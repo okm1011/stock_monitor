@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
-from app.config import RsiConfig
-from app.models import WatchTarget
+from app.config import AppConfig, AtrConfig
+from app.context import build_context
+from app.models import Candle, WatchTarget
+from app.rules import build_rules
+from app.rules.base import AlertRule, AlertSignal, IndicatorContext
 from app.settings import Settings, get_settings
 
 
@@ -21,8 +25,6 @@ class ConsoleNotifier(Notifier):
 
 
 class TelegramNotifier(Notifier):
-    """Telegram Bot API sendMessage."""
-
     def __init__(self, bot_token: str, chat_id: str, timeout: float = 15.0) -> None:
         self.bot_token = bot_token.strip()
         self.chat_id = str(chat_id).strip()
@@ -47,8 +49,6 @@ class TelegramNotifier(Notifier):
 
 
 class MultiNotifier(Notifier):
-    """여러 Notifier에 동시에 전달. 개별 실패는 로그만 남기고 계속."""
-
     def __init__(self, notifiers: list[Notifier]) -> None:
         self.notifiers = notifiers
 
@@ -73,7 +73,6 @@ class MultiNotifier(Notifier):
 
 
 def build_notifier(settings: Settings | None = None) -> Notifier:
-    """콘솔 항상 사용. 텔레그램 env가 있으면 함께 사용."""
     settings = settings or get_settings()
     notifiers: list[Notifier] = [ConsoleNotifier()]
     if settings.telegram_enabled:
@@ -86,57 +85,129 @@ def build_notifier(settings: Settings | None = None) -> Notifier:
 @dataclass
 class AlertEvent:
     target: WatchTarget
-    rsi: float
-    price: float
-    side: str  # "oversold" | "overbought"
+    signal: AlertSignal
     timeframe: str
+    price: float
+    atr: float | None
+    sl: float | None
+    tp: float | None
+    extras: dict[str, Any] = field(default_factory=dict)
 
     def message(self) -> str:
-        label = "RSI 이하(과매도)" if self.side == "oversold" else "RSI 이상(과매수)"
-        return (
-            f"[ALERT] {self.target.name} ({self.target.symbol})\n"
-            f"{label}\n"
-            f"RSI={self.rsi:.2f} (period 확인: config rsi.period)\n"
-            f"price={self.price}\n"
-            f"tf={self.timeframe}"
-        )
+        lines = [
+            self.signal.title,
+            f"{self.target.name} ({self.target.symbol})",
+        ]
+        if self.signal.detail:
+            lines.append(self.signal.detail)
+        lines.append(f"price={_fmt_price(self.price)}  tf={self.timeframe}")
+        if self.atr is not None and self.sl is not None and self.tp is not None:
+            sl_diff = self.sl - self.price
+            tp_diff = self.tp - self.price
+            lines.append("----------")
+            lines.append(f"ATR 기반 TP/SL 가이드")
+            lines.append(
+                f"- 손절가 (SL): {_fmt_price(self.sl)} ({_fmt_signed(sl_diff)})"
+            )
+            lines.append(
+                f"- 익절가 (TP): {_fmt_price(self.tp)} ({_fmt_signed(tp_diff)})"
+            )
+        return "\n".join(lines)
+
+
+def compute_tp_sl(
+    price: float,
+    atr: float | None,
+    side: str,
+    atr_cfg: AtrConfig,
+) -> tuple[float | None, float | None]:
+    if atr is None or atr <= 0:
+        return None, None
+    sl_dist = atr_cfg.sl_mult * atr
+    tp_dist = atr_cfg.tp_mult * atr
+    if side in ("long", "watch_long"):
+        return price - sl_dist, price + tp_dist
+    if side in ("short", "watch_short"):
+        return price + sl_dist, price - tp_dist
+    return None, None
 
 
 @dataclass
-class RsiAlertEngine:
-    rsi_cfg: RsiConfig
+class RuleEngine:
+    """등록된 AlertRule들을 실행. 새 규칙은 rules/ 에 추가 후 registry만 수정."""
+
+    config: AppConfig
+    rules: list[AlertRule] = field(default_factory=build_rules)
     cooldown_seconds: int = 300
     _last_sent: dict[str, float] = field(default_factory=dict)
+    _last_closed_ot: dict[str, int] = field(default_factory=dict)
 
-    def evaluate(
+    def evaluate_candles(
         self,
         target: WatchTarget,
-        rsi: float | None,
-        price: float,
-        timeframe: str,
-    ) -> AlertEvent | None:
-        if rsi is None:
-            return None
+        candles: list[Candle],
+        *,
+        allow_alert: bool = True,
+    ) -> tuple[IndicatorContext | None, list[AlertEvent]]:
+        closed = [c for c in candles if c.closed] if self.config.signal_on_closed_bar else candles
+        if not closed:
+            closed = candles[:-1] if len(candles) > 1 else []
+        ctx = build_context(target, self.config.timeframe, closed, self.config)
+        if ctx is None:
+            return None, []
 
-        side: str | None = None
-        if rsi <= self.rsi_cfg.min:
-            side = "oversold"
-        elif rsi >= self.rsi_cfg.max:
-            side = "overbought"
-        if side is None:
-            return None
+        closed_ot = closed[-1].open_time
+        prev_ot = self._last_closed_ot.get(target.key)
+        is_new_bar = prev_ot is None or closed_ot != prev_ot
+        self._last_closed_ot[target.key] = closed_ot
 
-        key = f"{target.key}:{side}"
-        now = time.monotonic()
-        last = self._last_sent.get(key, 0.0)
-        if now - last < self.cooldown_seconds:
-            return None
+        events: list[AlertEvent] = []
+        # 시작 백필 중에는 상태만 갱신하고 알람은 생략(폭주 방지)
+        if not allow_alert or not is_new_bar:
+            return ctx, events
+        # 첫 관측(백필 직후 첫 틱)도 알람 생략: prev_ot is None 이었던 경우
+        # allow_alert=True 이고 prev was None -> skip once by treating as arming
+        if prev_ot is None:
+            return ctx, events
 
-        self._last_sent[key] = now
-        return AlertEvent(
-            target=target,
-            rsi=rsi,
-            price=price,
-            side=side,
-            timeframe=timeframe,
-        )
+        price = ctx.last_close()
+        atr = ctx.last_atr()
+        for rule in self.rules:
+            if not rule.enabled(self.config):
+                continue
+            try:
+                signals = rule.evaluate(ctx, self.config)
+            except Exception:
+                continue
+            for sig in signals:
+                key = f"{target.key}:{sig.rule_id}:{sig.side}"
+                now = time.monotonic()
+                if now - self._last_sent.get(key, 0.0) < self.cooldown_seconds:
+                    continue
+                self._last_sent[key] = now
+                sl, tp = compute_tp_sl(price, atr, sig.side, self.config.atr)
+                events.append(
+                    AlertEvent(
+                        target=target,
+                        signal=sig,
+                        timeframe=self.config.timeframe,
+                        price=price,
+                        atr=atr,
+                        sl=sl,
+                        tp=tp,
+                        extras=sig.extras,
+                    )
+                )
+        return ctx, events
+
+
+def _fmt_price(price: float) -> str:
+    if abs(price) >= 1000:
+        return f"{price:,.2f}"
+    if abs(price) >= 1:
+        return f"{price:,.4f}"
+    return f"{price:.6f}"
+
+
+def _fmt_signed(v: float) -> str:
+    return f"{v:+,.2f}" if abs(v) >= 1 else f"{v:+.6f}"

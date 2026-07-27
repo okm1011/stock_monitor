@@ -14,7 +14,6 @@ from app.timeframes import TIMEFRAME_SECONDS
 
 TIMEFRAMES = list(TIMEFRAME_SECONDS.keys())
 
-# Toss-inspired palette
 BG = "#F2F4F6"
 CARD = "#FFFFFF"
 TEXT = "#191F28"
@@ -33,14 +32,12 @@ FONT_BTN = ("Segoe UI", 12, "bold")
 
 
 class MonitorApp(tk.Tk):
-    """토스 스타일 설정 UI + Start/Stop."""
-
     def __init__(self, config_path: Path | None = None) -> None:
         super().__init__()
         self.config_path = config_path or default_config_path()
         self.title("Stock Monitor")
-        self.geometry("860x720")
-        self.minsize(760, 640)
+        self.geometry("900x760")
+        self.minsize(780, 680)
         self.configure(bg=BG)
 
         self._monitor: Monitor | None = None
@@ -48,16 +45,24 @@ class MonitorApp(tk.Tk):
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._status_queue: queue.Queue[tuple[dict, dict]] = queue.Queue()
         self._running = False
-        self._entries: list[tk.Entry] = []
 
         self.var_poll = tk.StringVar()
         self.var_tf = tk.StringVar()
-        self.var_period = tk.StringVar()
-        self.var_min = tk.StringVar()
-        self.var_max = tk.StringVar()
+        self.var_rsi = tk.StringVar()
+        self.var_macd = tk.StringVar()
+        self.var_bb = tk.StringVar()
+        self.var_atr_sl = tk.StringVar()
+        self.var_atr_tp = tk.StringVar()
         self.var_cooldown = tk.StringVar()
-        self.var_status = tk.StringVar()
-        self.var_max_candles = tk.StringVar()
+        self.var_ext_hi = tk.StringVar()
+        self.var_ext_lo = tk.StringVar()
+        self.var_cross_os = tk.StringVar()
+        self.var_cross_ob = tk.StringVar()
+        self.var_sq = tk.StringVar()
+        self.var_rule1 = tk.BooleanVar(value=True)
+        self.var_rule2 = tk.BooleanVar(value=True)
+        self.var_rule3 = tk.BooleanVar(value=True)
+        self.var_rule4 = tk.BooleanVar(value=True)
 
         self._build()
         self._load_into_form()
@@ -67,97 +72,52 @@ class MonitorApp(tk.Tk):
     def _card(self, parent: tk.Misc, **pack) -> tk.Frame:
         wrap = tk.Frame(parent, bg=BG)
         wrap.pack(fill=tk.X, **pack)
-        # soft edge simulation
         shadow = tk.Frame(wrap, bg="#E8EAED")
         shadow.pack(fill=tk.X, padx=1, pady=(0, 2))
-        card = tk.Frame(shadow, bg=CARD, padx=20, pady=18)
+        card = tk.Frame(shadow, bg=CARD, padx=20, pady=16)
         card.pack(fill=tk.X)
         return card
 
     def _pill(self, parent: tk.Misc, text: str, fg: str, bg: str) -> tk.Label:
-        return tk.Label(
-            parent,
-            text=text,
-            font=FONT_SMALL,
-            fg=fg,
-            bg=bg,
-            padx=10,
-            pady=4,
-        )
+        return tk.Label(parent, text=text, font=FONT_SMALL, fg=fg, bg=bg, padx=10, pady=4)
 
-    def _field_row(self, parent: tk.Misc, label: str, var: tk.StringVar, choices: list[str] | None = None) -> None:
+    def _field(self, parent: tk.Misc, label: str, var: tk.StringVar, choices: list[str] | None = None) -> None:
         row = tk.Frame(parent, bg=CARD)
-        row.pack(fill=tk.X, pady=6)
-        tk.Label(row, text=label, font=FONT, fg=SUB, bg=CARD, width=18, anchor="w").pack(side=tk.LEFT)
+        row.pack(fill=tk.X, pady=4)
+        tk.Label(row, text=label, font=FONT, fg=SUB, bg=CARD, width=22, anchor="w").pack(side=tk.LEFT)
         if choices:
-            # simple option menu styled as input
             menu = tk.OptionMenu(row, var, *choices)
-            menu.config(
-                font=FONT,
-                bg=INPUT_BG,
-                fg=TEXT,
-                activebackground=INPUT_BG,
-                activeforeground=TEXT,
-                highlightthickness=0,
-                bd=0,
-                relief=tk.FLAT,
-                width=14,
-                anchor="w",
-            )
-            menu["menu"].config(font=FONT, bg=CARD, fg=TEXT, activebackground=BLUE, activeforeground="white")
-            menu.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+            menu.config(font=FONT, bg=INPUT_BG, fg=TEXT, highlightthickness=0, bd=0, relief=tk.FLAT, width=14)
+            menu.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
         else:
             entry = tk.Entry(
-                row,
-                textvariable=var,
-                font=FONT,
-                bg=INPUT_BG,
-                fg=TEXT,
-                relief=tk.FLAT,
-                highlightthickness=1,
-                highlightbackground=LINE,
-                highlightcolor=BLUE,
-                insertbackground=TEXT,
+                row, textvariable=var, font=FONT, bg=INPUT_BG, fg=TEXT, relief=tk.FLAT,
+                highlightthickness=1, highlightbackground=LINE, highlightcolor=BLUE, insertbackground=TEXT,
             )
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8, padx=(0, 0))
-            self._entries.append(entry)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=7)
 
-    def _btn(self, parent: tk.Misc, text: str, command, primary: bool = False, danger: bool = False) -> tk.Button:
+    def _btn(self, parent, text, command, primary=False, danger=False) -> tk.Button:
         if primary:
             bg, fg, active = BLUE, "white", BLUE_PRESS
         elif danger:
             bg, fg, active = "#FFF1F1", RED, "#FFE3E3"
         else:
             bg, fg, active = INPUT_BG, TEXT, LINE
-        btn = tk.Button(
-            parent,
-            text=text,
-            command=command,
-            font=FONT_BTN,
-            bg=bg,
-            fg=fg,
-            activebackground=active,
-            activeforeground=fg if not primary else "white",
-            relief=tk.FLAT,
-            bd=0,
-            padx=18,
-            pady=10,
-            cursor="hand2",
+        return tk.Button(
+            parent, text=text, command=command, font=FONT_BTN, bg=bg, fg=fg,
+            activebackground=active, relief=tk.FLAT, bd=0, padx=16, pady=9, cursor="hand2",
         )
-        return btn
 
     def _build(self) -> None:
-        root = tk.Frame(self, bg=BG, padx=24, pady=20)
+        root = tk.Frame(self, bg=BG, padx=24, pady=18)
         root.pack(fill=tk.BOTH, expand=True)
 
-        # Header
         header = tk.Frame(root, bg=BG)
-        header.pack(fill=tk.X, pady=(0, 16))
+        header.pack(fill=tk.X, pady=(0, 12))
         left = tk.Frame(header, bg=BG)
         left.pack(side=tk.LEFT)
         tk.Label(left, text="Stock Monitor", font=FONT_TITLE, fg=TEXT, bg=BG).pack(anchor="w")
-        tk.Label(left, text="RSI 조건 알림 · 실시간 모니터", font=FONT_SMALL, fg=SUB, bg=BG).pack(anchor="w", pady=(2, 0))
-
+        tk.Label(left, text="1h 봉마감 · RSI/MACD/BB/다이버전스 규칙 엔진", font=FONT_SMALL, fg=SUB, bg=BG).pack(anchor="w")
         right = tk.Frame(header, bg=BG)
         right.pack(side=tk.RIGHT)
         self.tg_pill = self._pill(right, "Telegram", BLUE, "#E8F3FF")
@@ -166,47 +126,44 @@ class MonitorApp(tk.Tk):
         self.state_pill.pack(side=tk.RIGHT)
         self._refresh_telegram_label()
 
-        # Settings card
-        conf = self._card(root, pady=(0, 12))
-        tk.Label(conf, text="모니터 설정", font=FONT_B, fg=TEXT, bg=CARD).pack(anchor="w")
-        tk.Label(
-            conf,
-            text="변경 후 저장하거나 Start 하면 config.yaml 에 반영됩니다.",
-            font=FONT_SMALL,
-            fg=SUB,
-            bg=CARD,
-        ).pack(anchor="w", pady=(2, 10))
+        conf = self._card(root, pady=(0, 10))
+        tk.Label(conf, text="공통 설정", font=FONT_B, fg=TEXT, bg=CARD).pack(anchor="w")
+        cols = tk.Frame(conf, bg=CARD)
+        cols.pack(fill=tk.X, pady=(8, 0))
+        c1 = tk.Frame(cols, bg=CARD)
+        c2 = tk.Frame(cols, bg=CARD)
+        c1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        c2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._field(c1, "폴링(초)", self.var_poll)
+        self._field(c1, "봉 단위", self.var_tf, TIMEFRAMES)
+        self._field(c1, "RSI period", self.var_rsi)
+        self._field(c1, "MACD fast,slow,signal", self.var_macd)
+        self._field(c2, "BB period,stddev", self.var_bb)
+        self._field(c2, "ATR SL배수", self.var_atr_sl)
+        self._field(c2, "ATR TP배수", self.var_atr_tp)
+        self._field(c2, "알림 쿨다운(초)", self.var_cooldown)
 
-        grid = tk.Frame(conf, bg=CARD)
-        grid.pack(fill=tk.X)
-        col1 = tk.Frame(grid, bg=CARD)
-        col2 = tk.Frame(grid, bg=CARD)
-        col1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12))
-        col2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        rules = self._card(root, pady=(0, 10))
+        tk.Label(rules, text="알람 규칙 (상세 임계값은 config.yaml)", font=FONT_B, fg=TEXT, bg=CARD).pack(anchor="w")
+        toggles = tk.Frame(rules, bg=CARD)
+        toggles.pack(fill=tk.X, pady=(8, 4))
+        tk.Checkbutton(toggles, text="1 극단 RSI", variable=self.var_rule1, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Checkbutton(toggles, text="2 RSI+MACD", variable=self.var_rule2, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Checkbutton(toggles, text="3 다이버전스", variable=self.var_rule3, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Checkbutton(toggles, text="4 BB스퀴즈", variable=self.var_rule4, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT)
+        rcols = tk.Frame(rules, bg=CARD)
+        rcols.pack(fill=tk.X)
+        rc1 = tk.Frame(rcols, bg=CARD)
+        rc2 = tk.Frame(rcols, bg=CARD)
+        rc1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        rc2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._field(rc1, "극단 RSI high/low", self.var_ext_hi)
+        self._field(rc1, "극단 RSI low", self.var_ext_lo)
+        self._field(rc2, "크로스 oversold/ob", self.var_cross_os)
+        self._field(rc2, "스퀴즈 비율", self.var_sq)
 
-        self._field_row(col1, "폴링 간격(초)", self.var_poll)
-        self._field_row(col1, "봉 단위", self.var_tf, TIMEFRAMES)
-        self._field_row(col1, "RSI period", self.var_period)
-        self._field_row(col1, "알림 쿨다운(초)", self.var_cooldown)
-
-        self._field_row(col2, "RSI min (이하)", self.var_min)
-        self._field_row(col2, "RSI max (이상)", self.var_max)
-        self._field_row(col2, "상태 로그 주기(초)", self.var_status)
-        self._field_row(col2, "히스토리 봉 개수", self.var_max_candles)
-
-        tk.Label(
-            conf,
-            text="심볼(코인/주식)은 config.yaml 에서 수정 · 코인은 많이 넣도 비교적 가볍고, 주식은 늘릴수록 부하↑",
-            font=FONT_SMALL,
-            fg=SUB,
-            bg=CARD,
-            wraplength=760,
-            justify="left",
-        ).pack(anchor="w", pady=(8, 0))
-
-        # Actions
         actions = tk.Frame(root, bg=BG)
-        actions.pack(fill=tk.X, pady=(0, 12))
+        actions.pack(fill=tk.X, pady=(0, 10))
         self.btn_start = self._btn(actions, "시작하기", self._start, primary=True)
         self.btn_start.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = self._btn(actions, "중지", self._stop, danger=True)
@@ -217,47 +174,22 @@ class MonitorApp(tk.Tk):
         self.btn_tg = self._btn(actions, "텔레그램 테스트", self._telegram_test)
         self.btn_tg.pack(side=tk.LEFT)
 
-        # Status card
-        status_card = self._card(root, pady=(0, 12))
+        status_card = self._card(root, pady=(0, 10))
         tk.Label(status_card, text="현재가 / RSI", font=FONT_B, fg=TEXT, bg=CARD).pack(anchor="w")
-        self.status_text = tk.Text(
-            status_card,
-            height=5,
-            wrap=tk.WORD,
-            font=("Consolas", 10),
-            bg=INPUT_BG,
-            fg=TEXT,
-            relief=tk.FLAT,
-            padx=12,
-            pady=10,
-            highlightthickness=0,
-            state=tk.DISABLED,
-        )
-        self.status_text.pack(fill=tk.X, pady=(10, 0))
+        self.status_text = tk.Text(status_card, height=5, wrap=tk.WORD, font=("Consolas", 10), bg=INPUT_BG, fg=TEXT, relief=tk.FLAT, padx=12, pady=10, highlightthickness=0, state=tk.DISABLED)
+        self.status_text.pack(fill=tk.X, pady=(8, 0))
 
-        # Log card
         log_wrap = tk.Frame(root, bg=BG)
         log_wrap.pack(fill=tk.BOTH, expand=True)
         shadow = tk.Frame(log_wrap, bg="#E8EAED")
         shadow.pack(fill=tk.BOTH, expand=True, padx=1, pady=(0, 2))
-        log_card = tk.Frame(shadow, bg=CARD, padx=20, pady=18)
+        log_card = tk.Frame(shadow, bg=CARD, padx=20, pady=16)
         log_card.pack(fill=tk.BOTH, expand=True)
         tk.Label(log_card, text="로그", font=FONT_B, fg=TEXT, bg=CARD).pack(anchor="w")
-        log_body = tk.Frame(log_card, bg=CARD)
-        log_body.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        self.log_text = tk.Text(
-            log_body,
-            wrap=tk.WORD,
-            font=("Consolas", 9),
-            bg=INPUT_BG,
-            fg=TEXT,
-            relief=tk.FLAT,
-            padx=12,
-            pady=10,
-            highlightthickness=0,
-            state=tk.DISABLED,
-        )
-        scroll = tk.Scrollbar(log_body, command=self.log_text.yview, bg=CARD, troughcolor=INPUT_BG)
+        body = tk.Frame(log_card, bg=CARD)
+        body.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        self.log_text = tk.Text(body, wrap=tk.WORD, font=("Consolas", 9), bg=INPUT_BG, fg=TEXT, relief=tk.FLAT, padx=12, pady=10, highlightthickness=0, state=tk.DISABLED)
+        scroll = tk.Scrollbar(body, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -274,27 +206,52 @@ class MonitorApp(tk.Tk):
         cfg = load_config(self.config_path)
         self.var_poll.set(str(cfg.poll_interval_seconds))
         self.var_tf.set(cfg.timeframe)
-        self.var_period.set(str(cfg.rsi.period))
-        self.var_min.set(str(cfg.rsi.min))
-        self.var_max.set(str(cfg.rsi.max))
+        self.var_rsi.set(str(cfg.rsi.period))
+        self.var_macd.set(f"{cfg.macd.fast},{cfg.macd.slow},{cfg.macd.signal}")
+        self.var_bb.set(f"{cfg.bollinger.period},{cfg.bollinger.stddev}")
+        self.var_atr_sl.set(str(cfg.atr.sl_mult))
+        self.var_atr_tp.set(str(cfg.atr.tp_mult))
         self.var_cooldown.set(str(cfg.alert_cooldown_seconds))
-        self.var_status.set(str(cfg.status_log_seconds))
-        self.var_max_candles.set(str(cfg.history.max_candles))
+        self.var_ext_hi.set(str(cfg.rules.extreme_rsi.high))
+        self.var_ext_lo.set(str(cfg.rules.extreme_rsi.low))
+        self.var_cross_os.set(f"{cfg.rules.rsi_macd_cross.oversold},{cfg.rules.rsi_macd_cross.overbought}")
+        self.var_sq.set(str(cfg.rules.bb_squeeze.squeeze_ratio))
+        self.var_rule1.set(cfg.rules.extreme_rsi.enabled)
+        self.var_rule2.set(cfg.rules.rsi_macd_cross.enabled)
+        self.var_rule3.set(cfg.rules.divergence.enabled)
+        self.var_rule4.set(cfg.rules.bb_squeeze.enabled)
         self._append_log(f"설정 로드 · {self.config_path}")
+
+    def _parse_csv_nums(self, text: str, n: int) -> list[float]:
+        parts = [p.strip() for p in text.split(",") if p.strip()]
+        if len(parts) != n:
+            raise ValueError(f"{n}개 숫자가 필요합니다: {text}")
+        return [float(p) for p in parts]
 
     def _read_form_config(self) -> AppConfig:
         base = load_config(self.config_path)
         data = base.model_dump(mode="python")
         data["poll_interval_seconds"] = float(self.var_poll.get().strip())
         data["timeframe"] = self.var_tf.get().strip()
+        data["signal_on_closed_bar"] = True
+        data["rsi"] = {"period": int(float(self.var_rsi.get().strip()))}
+        f, s, sig = self._parse_csv_nums(self.var_macd.get(), 3)
+        data["macd"] = {"fast": int(f), "slow": int(s), "signal": int(sig)}
+        bp, bs = self._parse_csv_nums(self.var_bb.get(), 2)
+        data["bollinger"] = {"period": int(bp), "stddev": bs}
+        data["atr"]["sl_mult"] = float(self.var_atr_sl.get().strip())
+        data["atr"]["tp_mult"] = float(self.var_atr_tp.get().strip())
         data["alert_cooldown_seconds"] = int(float(self.var_cooldown.get().strip()))
-        data["status_log_seconds"] = float(self.var_status.get().strip())
-        data["rsi"] = {
-            "period": int(float(self.var_period.get().strip())),
-            "min": float(self.var_min.get().strip()),
-            "max": float(self.var_max.get().strip()),
-        }
-        data["history"]["max_candles"] = int(float(self.var_max_candles.get().strip()))
+        data["rules"]["extreme_rsi"]["enabled"] = bool(self.var_rule1.get())
+        data["rules"]["extreme_rsi"]["high"] = float(self.var_ext_hi.get().strip())
+        data["rules"]["extreme_rsi"]["low"] = float(self.var_ext_lo.get().strip())
+        os_, ob_ = self._parse_csv_nums(self.var_cross_os.get(), 2)
+        data["rules"]["rsi_macd_cross"]["enabled"] = bool(self.var_rule2.get())
+        data["rules"]["rsi_macd_cross"]["oversold"] = os_
+        data["rules"]["rsi_macd_cross"]["overbought"] = ob_
+        data["rules"]["divergence"]["enabled"] = bool(self.var_rule3.get())
+        data["rules"]["bb_squeeze"]["enabled"] = bool(self.var_rule4.get())
+        data["rules"]["bb_squeeze"]["squeeze_ratio"] = float(self.var_sq.get().strip())
         return AppConfig.model_validate(data)
 
     def _save(self) -> None:
@@ -335,12 +292,7 @@ class MonitorApp(tk.Tk):
         def on_status(prices: dict, rsis: dict) -> None:
             self._status_queue.put((prices, rsis))
 
-        monitor = Monitor(
-            cfg,
-            on_log=on_log,
-            on_status=on_status,
-            register_signals=False,
-        )
+        monitor = Monitor(cfg, on_log=on_log, on_status=on_status, register_signals=False)
         self._monitor = monitor
 
         def worker() -> None:
@@ -393,32 +345,27 @@ class MonitorApp(tk.Tk):
                 self._append_log("모니터가 종료되었습니다")
             else:
                 self._append_log(msg)
-
         while True:
             try:
                 prices, rsis = self._status_queue.get_nowait()
             except queue.Empty:
                 break
             self._render_status(prices, rsis)
-
         self.after(200, self._poll_queues)
 
     def _render_status(self, prices: dict, rsis: dict) -> None:
         lines = []
-        for key, price in prices.items():
+        for key, price in list(prices.items())[:20]:
             rsi = rsis.get(key)
             rsi_s = f"{rsi:.1f}" if isinstance(rsi, (int, float)) else "n/a"
             symbol = key.split(":", 1)[-1]
             if isinstance(price, float):
-                if abs(price) >= 1000:
-                    price_s = f"{price:,.2f}"
-                elif abs(price) >= 1:
-                    price_s = f"{price:,.4f}"
-                else:
-                    price_s = f"{price:.6f}"
+                price_s = f"{price:,.2f}" if abs(price) >= 1000 else (f"{price:,.4f}" if abs(price) >= 1 else f"{price:.6f}")
             else:
                 price_s = str(price)
             lines.append(f"{symbol:<12}  {price_s:>14}   RSI {rsi_s}")
+        if len(prices) > 20:
+            lines.append(f"... +{len(prices)-20} more")
         text = "\n".join(lines) if lines else "데이터를 기다리는 중..."
         self.status_text.configure(state=tk.NORMAL)
         self.status_text.delete("1.0", tk.END)
@@ -434,7 +381,6 @@ class MonitorApp(tk.Tk):
     def _on_close(self) -> None:
         if self._running and self._monitor is not None:
             self._monitor.request_stop()
-            self._append_log("창 종료 · 모니터 중지 중...")
             self.after(500, self.destroy)
         else:
             self.destroy()

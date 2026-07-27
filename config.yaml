@@ -308,13 +308,49 @@ us_stocks:
 - ticker: DIS
   name: Disney
 poll_interval_seconds: 5.0
-timeframe: 15m
+timeframe: 1h
+signal_on_closed_bar: true
+
 rsi:
   period: 7
-  min: 30.0
-  max: 70.0
-  closed_only: false
-alert_cooldown_seconds: 30
+
+macd:
+  fast: 12
+  slow: 26
+  signal: 9
+
+bollinger:
+  period: 20
+  stddev: 2.0
+
+atr:
+  period: 14
+  sl_mult: 1.5
+  tp_mult: 3.0
+
+rules:
+  extreme_rsi:
+    enabled: true
+    high: 80.0
+    low: 23.0
+  rsi_macd_cross:
+    enabled: true
+    oversold: 30.0
+    overbought: 70.0
+  divergence:
+    enabled: true
+    oversold: 30.0
+    overbought: 70.0
+    lookback: 60
+    pivot_left: 3
+    pivot_right: 3
+    use_rsi: true
+    use_macd: true
+  bb_squeeze:
+    enabled: true
+    squeeze_ratio: 0.05
+
+alert_cooldown_seconds: 300
 history:
   max_candles: 300
   db_path: data/candles.db

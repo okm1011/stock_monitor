@@ -26,11 +26,7 @@ class StockSymbol(BaseModel):
 
 
 class RsiConfig(BaseModel):
-    period: int = 14
-    min: float = 30.0
-    max: float = 70.0
-    # True면 완성된 봉만으로 RSI 계산 (확정값). False면 진행 중 봉 포함(차트 실시간과 유사)
-    closed_only: bool = False
+    period: int = 7
 
     @field_validator("period")
     @classmethod
@@ -39,13 +35,57 @@ class RsiConfig(BaseModel):
             raise ValueError("rsi.period must be >= 2")
         return v
 
-    @field_validator("max")
-    @classmethod
-    def _range_ok(cls, v: float, info) -> float:
-        min_v = info.data.get("min")
-        if min_v is not None and v <= min_v:
-            raise ValueError("rsi.max must be > rsi.min")
-        return v
+
+class MacdConfig(BaseModel):
+    fast: int = 12
+    slow: int = 26
+    signal: int = 9
+
+
+class BollingerConfig(BaseModel):
+    period: int = 20
+    stddev: float = 2.0
+
+
+class AtrConfig(BaseModel):
+    period: int = 14
+    sl_mult: float = 1.5
+    tp_mult: float = 3.0
+
+
+class ExtremeRsiRuleConfig(BaseModel):
+    enabled: bool = True
+    high: float = 80.0
+    low: float = 23.0
+
+
+class RsiMacdCrossRuleConfig(BaseModel):
+    enabled: bool = True
+    oversold: float = 30.0
+    overbought: float = 70.0
+
+
+class DivergenceRuleConfig(BaseModel):
+    enabled: bool = True
+    oversold: float = 30.0
+    overbought: float = 70.0
+    lookback: int = 60
+    pivot_left: int = 3
+    pivot_right: int = 3
+    use_rsi: bool = True
+    use_macd: bool = True
+
+
+class BbSqueezeRuleConfig(BaseModel):
+    enabled: bool = True
+    squeeze_ratio: float = 0.05
+
+
+class RulesConfig(BaseModel):
+    extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
+    rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
+    divergence: DivergenceRuleConfig = Field(default_factory=DivergenceRuleConfig)
+    bb_squeeze: BbSqueezeRuleConfig = Field(default_factory=BbSqueezeRuleConfig)
 
 
 class HistoryConfig(BaseModel):
@@ -57,12 +97,18 @@ class AppConfig(BaseModel):
     crypto: list[CryptoSymbol] = Field(default_factory=list)
     kr_stocks: list[StockSymbol] = Field(default_factory=list)
     us_stocks: list[StockSymbol] = Field(default_factory=list)
-    poll_interval_seconds: float = 1.0
-    timeframe: Timeframe = "1m"
+    poll_interval_seconds: float = 5.0
+    timeframe: Timeframe = "1h"
+    # 알람은 완성 봉 마감 기준
+    signal_on_closed_bar: bool = True
     rsi: RsiConfig = Field(default_factory=RsiConfig)
+    macd: MacdConfig = Field(default_factory=MacdConfig)
+    bollinger: BollingerConfig = Field(default_factory=BollingerConfig)
+    atr: AtrConfig = Field(default_factory=AtrConfig)
+    rules: RulesConfig = Field(default_factory=RulesConfig)
     alert_cooldown_seconds: int = 300
     history: HistoryConfig = Field(default_factory=HistoryConfig)
-    status_log_seconds: float = 10.0
+    status_log_seconds: float = 15.0
 
     @field_validator("poll_interval_seconds")
     @classmethod
@@ -78,6 +124,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         raise FileNotFoundError(f"Config not found: {config_path}")
     with config_path.open(encoding="utf-8") as f:
         data: dict[str, Any] = yaml.safe_load(f) or {}
+    # 구버전 rsi.min/max 호환: 무시하고 새 스키마로 로드
+    if isinstance(data.get("rsi"), dict):
+        legacy = data["rsi"]
+        data["rsi"] = {"period": legacy.get("period", 7)}
     return AppConfig.model_validate(data)
 
 
@@ -86,7 +136,6 @@ def default_config_path() -> Path:
 
 
 def save_config(config: AppConfig, path: str | Path | None = None) -> Path:
-    """현재 설정을 YAML로 저장 (감시 심볼 포함)."""
     config_path = Path(path) if path else default_config_path()
     payload = config.model_dump(mode="python")
     text = yaml.safe_dump(
@@ -96,8 +145,9 @@ def save_config(config: AppConfig, path: str | Path | None = None) -> Path:
         default_flow_style=False,
     )
     header = (
-        "# stock-monitor config (UI/CLI에서 저장됨)\n"
+        "# stock-monitor config\n"
         "# timeframe: 1m | 3m | 5m | 15m | 30m | 1h | 4h | 1d\n"
+        "# 알람은 signal_on_closed_bar=true 일 때 봉 마감 기준\n"
     )
     config_path.write_text(header + text, encoding="utf-8")
     return config_path

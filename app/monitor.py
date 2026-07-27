@@ -8,10 +8,9 @@ from datetime import datetime, timezone
 from rich.console import Console
 
 from app.aggregator import CandleAggregator
-from app.alerts import Notifier, RsiAlertEngine, build_notifier
+from app.alerts import Notifier, RuleEngine, build_notifier
 from app.config import AppConfig, resolve_db_path
 from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller, build_watch_targets
-from app.indicators import calc_rsi
 from app.models import AssetClass, WatchTarget
 from app.settings import get_settings
 from app.storage import CandleStore
@@ -23,7 +22,7 @@ StatusFn = Callable[[dict[str, float], dict[str, float | None]], None]
 
 
 class Monitor:
-    """상시 실행 모니터: 가격 폴링 -> 봉 집계/저장 -> RSI -> 알림."""
+    """상시 모니터: 봉 수집 -> (완성봉) 규칙 엔진 평가 -> 알림."""
 
     def __init__(
         self,
@@ -41,8 +40,8 @@ class Monitor:
         self.register_signals = register_signals
         self.targets = build_watch_targets(config)
         self.store = CandleStore(resolve_db_path(config), max_candles=config.history.max_candles)
-        self.alert_engine = RsiAlertEngine(
-            rsi_cfg=config.rsi,
+        self.engine = RuleEngine(
+            config=config,
             cooldown_seconds=config.alert_cooldown_seconds,
         )
         self.price_fetcher = LivePriceFetcher(stock_min_interval=max(5.0, config.poll_interval_seconds))
@@ -56,7 +55,13 @@ class Monitor:
         self._crypto_rr = 0
         self._latest_rsi: dict[str, float | None] = {}
         self._latest_price: dict[str, float] = {}
-        self._need = max(config.history.max_candles, config.rsi.period + 50)
+        self._armed = False
+        self._need = max(
+            config.history.max_candles,
+            config.macd.slow + config.macd.signal + 50,
+            config.bollinger.period + 50,
+            config.atr.period + 50,
+        )
         self._crypto_targets = [t for t in self.targets if t.asset_class == AssetClass.CRYPTO]
 
     def _log(self, message: str) -> None:
@@ -77,19 +82,23 @@ class Monitor:
             except Exception:
                 pass
 
-        mode = "closed_only" if self.config.rsi.closed_only else "live(진행봉포함)"
+        enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
         self._log(
             f"모니터 시작 poll={self.config.poll_interval_seconds}s "
-            f"tf={self.config.timeframe} RSI({self.config.rsi.period}) "
-            f"min={self.config.rsi.min} max={self.config.rsi.max} mode={mode}"
+            f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
+        )
+        self._log(f"규칙: {', '.join(enabled) if enabled else '(없음)'}")
+        self._log(
+            f"RSI({self.config.rsi.period}) MACD({self.config.macd.fast},{self.config.macd.slow},{self.config.macd.signal}) "
+            f"BB({self.config.bollinger.period},{self.config.bollinger.stddev}) "
+            f"ATR SL={self.config.atr.sl_mult} TP={self.config.atr.tp_mult}"
         )
         self._log(f"심볼 {len(self.targets)}개 | DB={resolve_db_path(self.config)}")
-        if self.settings.telegram_enabled:
-            self._log("Telegram 알림: ON")
-        else:
-            self._log("Telegram 알림: OFF (.env 확인)")
+        self._log("Telegram 알림: ON" if self.settings.telegram_enabled else "Telegram 알림: OFF")
 
         self._backfill_all()
+        self._armed = True
+        self._log("백필 완료 - 이후 새 봉 마감부터 알람 활성")
 
         while not self._stop:
             loop_started = time.monotonic()
@@ -107,21 +116,19 @@ class Monitor:
 
         self._shutdown()
 
-    def _closes_for_rsi(self, symbol_key: str) -> list[float]:
-        candles = self.store.get_candles(symbol_key, self.config.timeframe)
-        if self.config.rsi.closed_only:
-            return [c.close for c in candles if c.closed]
-        return [c.close for c in candles]
+    def _emit_events(self, events) -> None:
+        for ev in events:
+            self.notifier.send(ev.message())
+            self._log(ev.message().replace("\n", " | "))
 
-    def _apply_rsi_and_alert(self, t: WatchTarget, price: float) -> None:
-        closes = self._closes_for_rsi(t.key)
-        rsi = calc_rsi(closes, self.config.rsi.period)
-        self._latest_rsi[t.key] = rsi
-        self._latest_price[t.key] = price
-        event = self.alert_engine.evaluate(t, rsi, price, self.config.timeframe)
-        if event is not None:
-            self.notifier.send(event.message())
-            self._log(event.message().replace("\n", " | "))
+    def _evaluate_target(self, t: WatchTarget, allow_alert: bool) -> None:
+        candles = self.store.get_candles(t.key, self.config.timeframe)
+        ctx, events = self.engine.evaluate_candles(t, candles, allow_alert=allow_alert and self._armed)
+        if ctx is not None:
+            self._latest_price[t.key] = ctx.last_close()
+            self._latest_rsi[t.key] = ctx.rsi[ctx.i]
+        if events:
+            self._emit_events(events)
 
     def _backfill_all(self) -> None:
         for t in self.targets:
@@ -132,10 +139,10 @@ class Monitor:
                 if candles:
                     self.store.upsert_many(candles)
                     self.aggregators[t.key].load(candles[-1])
-                    self._apply_rsi_and_alert(t, candles[-1].close)
+                    self._evaluate_target(t, allow_alert=False)
                     self._log(
                         f"backfill OK {t.name}: {len(candles)} candles, "
-                        f"RSI={_fmt_rsi(self._latest_rsi[t.key])}"
+                        f"RSI={_fmt_rsi(self._latest_rsi.get(t.key))}"
                     )
                 else:
                     self._log(f"backfill empty {t.name}")
@@ -144,18 +151,12 @@ class Monitor:
         self._emit_status(force=True)
 
     def _resync_crypto(self) -> None:
-        """
-        코인 봉을 Binance에서 부분 갱신.
-        전체를 매번 받지 않고, 라운드로빈으로 일부만 최신 봉(소수) 갱신해 부하를 줄임.
-        """
         if not self._crypto_targets:
             return
-
-        # 5초 폴링 기준: 한 번에 최대 8개, 최근 봉만
         batch = 8
-        sync_limit = max(self.config.rsi.period + 10, 40)
+        sync_limit = min(self._need, 120)
         n = len(self._crypto_targets)
-        for i in range(batch):
+        for i in range(min(batch, n)):
             t = self._crypto_targets[(self._crypto_rr + i) % n]
             try:
                 candles = self.backfiller.backfill(t, self.config.timeframe, sync_limit)
@@ -163,13 +164,12 @@ class Monitor:
                     continue
                 self.store.upsert_many(candles)
                 self.aggregators[t.key].load(candles[-1])
-                self._apply_rsi_and_alert(t, candles[-1].close)
+                self._evaluate_target(t, allow_alert=True)
             except Exception as exc:
                 self._log(f"crypto sync fail {t.name}: {exc}")
-        self._crypto_rr = (self._crypto_rr + batch) % n
+        self._crypto_rr = (self._crypto_rr + batch) % max(n, 1)
 
     def _tick(self) -> None:
-        # 코인: 거래소 봉 재동기화 (RSI가 바이낸스와 어긋나지 않게)
         now_m = time.monotonic()
         sync_every = max(5.0, float(self.config.poll_interval_seconds))
         if now_m - self._last_crypto_sync >= sync_every:
@@ -180,7 +180,6 @@ class Monitor:
         now = datetime.now(timezone.utc).timestamp()
 
         for t in self.targets:
-            # 코인은 위에서 kline 기준으로 이미 RSI 갱신
             if t.asset_class == AssetClass.CRYPTO:
                 if t.key in prices:
                     self._latest_price[t.key] = prices[t.key]
@@ -191,7 +190,7 @@ class Monitor:
                 continue
             updated = self.aggregators[t.key].update(price, now)
             self.store.upsert_many(updated)
-            self._apply_rsi_and_alert(t, price)
+            self._evaluate_target(t, allow_alert=True)
 
         self._emit_status()
 
@@ -214,7 +213,10 @@ class Monitor:
                 continue
             parts.append(f"{t.symbol}={_fmt_price(p)} RSI={_fmt_rsi(r)}")
         if parts:
-            self._log(f"{ts} " + " | ".join(parts))
+            # 너무 길면 앞부분만
+            shown = parts[:12]
+            more = f" ...(+{len(parts)-12})" if len(parts) > 12 else ""
+            self._log(f"{ts} " + " | ".join(shown) + more)
 
     def _shutdown(self) -> None:
         self.price_fetcher.close()
