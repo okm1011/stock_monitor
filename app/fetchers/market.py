@@ -6,12 +6,12 @@ from typing import Iterable
 import httpx
 import yfinance as yf
 
-from app.models import AssetClass, Candle, Quote, WatchTarget
+from app.models import AssetClass, Candle, DataFeed, WatchTarget
 from app.timeframes import BINANCE_INTERVAL, YFINANCE_INTERVAL
 
 
 class LivePriceFetcher:
-    """폴링용 최신 가격. 코인=Binance(매 폴링), 주식=yfinance(캐시 간격)."""
+    """폴링용 최신 가격. Binance spot/futures + (옵션) Yahoo."""
 
     def __init__(self, stock_min_interval: float = 5.0) -> None:
         self._http = httpx.Client(timeout=15.0)
@@ -25,20 +25,32 @@ class LivePriceFetcher:
     def fetch_prices(self, targets: Iterable[WatchTarget]) -> dict[str, float]:
         targets = list(targets)
         prices: dict[str, float] = {}
-        crypto = [t for t in targets if t.asset_class == AssetClass.CRYPTO]
-        stocks = [t for t in targets if t.asset_class != AssetClass.CRYPTO]
+        spot = [t for t in targets if t.feed == DataFeed.BINANCE_SPOT]
+        futures = [t for t in targets if t.feed == DataFeed.BINANCE_FUTURES]
+        yahoo = [t for t in targets if t.feed == DataFeed.YAHOO]
 
-        if crypto:
+        if spot:
             try:
-                prices.update(self._fetch_crypto(crypto))
+                prices.update(self._fetch_binance_spot(spot))
             except Exception:
                 pass
-        if stocks:
-            prices.update(self._fetch_stocks_cached(stocks))
+        if futures:
+            try:
+                prices.update(self._fetch_binance_futures(futures))
+            except Exception:
+                pass
+        if yahoo:
+            prices.update(self._fetch_stocks_cached(yahoo))
         return prices
 
-    def _fetch_crypto(self, targets: list[WatchTarget]) -> dict[str, float]:
+    def _fetch_binance_spot(self, targets: list[WatchTarget]) -> dict[str, float]:
         resp = self._http.get("https://api.binance.com/api/v3/ticker/price")
+        resp.raise_for_status()
+        rows = {row["symbol"]: float(row["price"]) for row in resp.json()}
+        return {t.key: rows[t.market_id] for t in targets if t.market_id in rows}
+
+    def _fetch_binance_futures(self, targets: list[WatchTarget]) -> dict[str, float]:
+        resp = self._http.get("https://fapi.binance.com/fapi/v1/ticker/price")
         resp.raise_for_status()
         rows = {row["symbol"]: float(row["price"]) for row in resp.json()}
         return {t.key: rows[t.market_id] for t in targets if t.market_id in rows}
@@ -79,7 +91,6 @@ class LivePriceFetcher:
         except Exception:
             pass
 
-        # 빠진 종목만 개별 폴백
         for t in targets:
             if t.key in out:
                 continue
@@ -131,12 +142,19 @@ class OhlcvBackfiller:
         self._http.close()
 
     def backfill(self, target: WatchTarget, timeframe: str, limit: int) -> list[Candle]:
-        if target.asset_class == AssetClass.CRYPTO:
-            return self._binance_klines(target, timeframe, limit)
+        if target.feed == DataFeed.BINANCE_SPOT:
+            return self._binance_klines(
+                "https://api.binance.com/api/v3/klines", target, timeframe, limit
+            )
+        if target.feed == DataFeed.BINANCE_FUTURES:
+            return self._binance_klines(
+                "https://fapi.binance.com/fapi/v1/klines", target, timeframe, limit
+            )
         return self._yahoo_history(target, timeframe, limit)
 
     def _binance_klines(
         self,
+        url: str,
         target: WatchTarget,
         timeframe: str,
         limit: int,
@@ -149,7 +167,7 @@ class OhlcvBackfiller:
             "interval": interval,
             "limit": min(limit, 1000),
         }
-        resp = self._http.get("https://api.binance.com/api/v3/klines", params=params)
+        resp = self._http.get(url, params=params)
         resp.raise_for_status()
         candles: list[Candle] = []
         rows = resp.json()
@@ -226,6 +244,7 @@ def build_watch_targets(config) -> list[WatchTarget]:
                 name=c.name,
                 currency="USDT",
                 market_id=c.market_symbol(),
+                feed=DataFeed.BINANCE_SPOT,
             )
         )
     for s in config.kr_stocks:
@@ -237,17 +256,27 @@ def build_watch_targets(config) -> list[WatchTarget]:
                 name=s.name,
                 currency="KRW",
                 market_id=s.ticker,
+                feed=DataFeed.YAHOO,
             )
         )
     for s in config.us_stocks:
+        if s.binance_futures:
+            market_id = s.binance_futures.upper()
+            feed = DataFeed.BINANCE_FUTURES
+            currency = "USDT"
+        else:
+            market_id = s.ticker
+            feed = DataFeed.YAHOO
+            currency = "USD"
         targets.append(
             WatchTarget(
                 key=f"us:{s.ticker}",
                 asset_class=AssetClass.US_STOCK,
                 symbol=s.ticker,
                 name=s.name,
-                currency="USD",
-                market_id=s.ticker,
+                currency=currency,
+                market_id=market_id,
+                feed=feed,
             )
         )
     return targets

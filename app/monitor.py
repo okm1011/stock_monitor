@@ -10,10 +10,11 @@ from rich.console import Console
 from app.aggregator import CandleAggregator
 from app.alerts import Notifier, RuleEngine, build_notifier
 from app.config import AppConfig, resolve_db_path
-from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller, build_watch_targets
+from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller
 from app.models import AssetClass, WatchTarget
 from app.settings import get_settings
 from app.storage import CandleStore
+from app.universe import BinanceUniverseService, resolve_watch_targets
 
 
 console = Console(force_terminal=True, soft_wrap=True)
@@ -22,7 +23,7 @@ StatusFn = Callable[[dict[str, float], dict[str, float | None]], None]
 
 
 class Monitor:
-    """상시 모니터: 봉 수집 -> (완성봉) 규칙 엔진 평가 -> 알림."""
+    """상시 모니터: 유니버스 갱신 -> 봉 수집 -> 규칙 엔진 -> 알림."""
 
     def __init__(
         self,
@@ -38,7 +39,6 @@ class Monitor:
         self.on_log = on_log
         self.on_status = on_status
         self.register_signals = register_signals
-        self.targets = build_watch_targets(config)
         self.store = CandleStore(resolve_db_path(config), max_candles=config.history.max_candles)
         self.engine = RuleEngine(
             config=config,
@@ -46,9 +46,8 @@ class Monitor:
         )
         self.price_fetcher = LivePriceFetcher(stock_min_interval=max(5.0, config.poll_interval_seconds))
         self.backfiller = OhlcvBackfiller()
-        self.aggregators: dict[str, CandleAggregator] = {
-            t.key: CandleAggregator(t.key, config.timeframe) for t in self.targets
-        }
+        self.targets: list[WatchTarget] = []
+        self.aggregators: dict[str, CandleAggregator] = {}
         self._stop = False
         self._last_status = 0.0
         self._last_crypto_sync = 0.0
@@ -62,7 +61,11 @@ class Monitor:
             config.bollinger.period + 50,
             config.atr.period + 50,
         )
-        self._crypto_targets = [t for t in self.targets if t.asset_class == AssetClass.CRYPTO]
+        self._crypto_targets: list[WatchTarget] = []
+        self._binance_klines_targets: list[WatchTarget] = []
+        self._universe_svc = (
+            BinanceUniverseService(config.universe) if config.universe.enabled else None
+        )
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
@@ -73,6 +76,19 @@ class Monitor:
     def request_stop(self, *_args) -> None:
         self._stop = True
         self._log("종료 요청...")
+
+    def _apply_targets(self, targets: list[WatchTarget], backfill_new_only: bool = False) -> None:
+        old_keys = {t.key for t in self.targets}
+        self.targets = targets
+        self._crypto_targets = [t for t in targets if t.asset_class == AssetClass.CRYPTO]
+        self._binance_klines_targets = [t for t in targets if t.uses_binance_klines()]
+        for t in targets:
+            if t.key not in self.aggregators:
+                self.aggregators[t.key] = CandleAggregator(t.key, self.config.timeframe)
+        # 제거된 심볼 aggregator는 남겨둬도 무방 (메모리 소량)
+        new_targets = [t for t in targets if t.key not in old_keys] if backfill_new_only else targets
+        if new_targets:
+            self._backfill_targets(new_targets)
 
     def start(self) -> None:
         if self.register_signals:
@@ -93,16 +109,25 @@ class Monitor:
             f"BB({self.config.bollinger.period},{self.config.bollinger.stddev}) "
             f"ATR SL={self.config.atr.sl_mult} TP={self.config.atr.tp_mult}"
         )
+        if self.config.universe.enabled:
+            u = self.config.universe
+            self._log(
+                f"유니버스: Binance {u.quote_asset} / {u.volume_lookback_days}일 거래량 "
+                f"상위 {u.top_percentile}% (max {u.max_symbols})"
+            )
+
+        targets = resolve_watch_targets(self.config, log=self._log, force_universe=False)
+        self._apply_targets(targets, backfill_new_only=False)
         self._log(f"심볼 {len(self.targets)}개 | DB={resolve_db_path(self.config)}")
         self._log("Telegram 알림: ON" if self.settings.telegram_enabled else "Telegram 알림: OFF")
 
-        self._backfill_all()
         self._armed = True
         self._log("백필 완료 - 이후 새 봉 마감부터 알람 활성")
 
         while not self._stop:
             loop_started = time.monotonic()
             try:
+                self._maybe_refresh_universe()
                 self._tick()
             except Exception as exc:
                 self._log(f"tick error: {exc}")
@@ -115,6 +140,17 @@ class Monitor:
                     time.sleep(min(0.2, end - time.monotonic()))
 
         self._shutdown()
+
+    def _maybe_refresh_universe(self) -> None:
+        if not self._universe_svc or not self._universe_svc.needs_refresh():
+            return
+        self._log("유니버스 일일 갱신 시작...")
+        try:
+            new_targets = resolve_watch_targets(self.config, log=self._log, force_universe=True)
+            self._apply_targets(new_targets, backfill_new_only=True)
+            self._log(f"유니버스 갱신 완료: {len(self.targets)}개")
+        except Exception as exc:
+            self._log(f"유니버스 갱신 실패(기존 목록 유지): {exc}")
 
     def _emit_events(self, events) -> None:
         for ev in events:
@@ -130,8 +166,8 @@ class Monitor:
         if events:
             self._emit_events(events)
 
-    def _backfill_all(self) -> None:
-        for t in self.targets:
+    def _backfill_targets(self, targets: list[WatchTarget]) -> None:
+        for t in targets:
             if self._stop:
                 return
             try:
@@ -150,14 +186,14 @@ class Monitor:
                 self._log(f"backfill fail {t.name}: {exc}")
         self._emit_status(force=True)
 
-    def _resync_crypto(self) -> None:
-        if not self._crypto_targets:
+    def _resync_binance_klines(self) -> None:
+        if not self._binance_klines_targets:
             return
         batch = 8
         sync_limit = min(self._need, 120)
-        n = len(self._crypto_targets)
+        n = len(self._binance_klines_targets)
         for i in range(min(batch, n)):
-            t = self._crypto_targets[(self._crypto_rr + i) % n]
+            t = self._binance_klines_targets[(self._crypto_rr + i) % n]
             try:
                 candles = self.backfiller.backfill(t, self.config.timeframe, sync_limit)
                 if not candles:
@@ -166,21 +202,21 @@ class Monitor:
                 self.aggregators[t.key].load(candles[-1])
                 self._evaluate_target(t, allow_alert=True)
             except Exception as exc:
-                self._log(f"crypto sync fail {t.name}: {exc}")
+                self._log(f"binance sync fail {t.name}: {exc}")
         self._crypto_rr = (self._crypto_rr + batch) % max(n, 1)
 
     def _tick(self) -> None:
         now_m = time.monotonic()
         sync_every = max(5.0, float(self.config.poll_interval_seconds))
         if now_m - self._last_crypto_sync >= sync_every:
-            self._resync_crypto()
+            self._resync_binance_klines()
             self._last_crypto_sync = now_m
 
         prices = self.price_fetcher.fetch_prices(self.targets)
         now = datetime.now(timezone.utc).timestamp()
 
         for t in self.targets:
-            if t.asset_class == AssetClass.CRYPTO:
+            if t.uses_binance_klines():
                 if t.key in prices:
                     self._latest_price[t.key] = prices[t.key]
                 continue
@@ -213,7 +249,6 @@ class Monitor:
                 continue
             parts.append(f"{t.symbol}={_fmt_price(p)} RSI={_fmt_rsi(r)}")
         if parts:
-            # 너무 길면 앞부분만
             shown = parts[:12]
             more = f" ...(+{len(parts)-12})" if len(parts) > 12 else ""
             self._log(f"{ts} " + " | ".join(shown) + more)
@@ -221,6 +256,8 @@ class Monitor:
     def _shutdown(self) -> None:
         self.price_fetcher.close()
         self.backfiller.close()
+        if self._universe_svc:
+            self._universe_svc.close()
         self.store.close()
         close = getattr(self.notifier, "close", None)
         if callable(close):

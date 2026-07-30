@@ -13,6 +13,12 @@ class AssetClass(str, Enum):
     US_STOCK = "us_stock"
 
 
+class DataFeed(str, Enum):
+    BINANCE_SPOT = "binance_spot"
+    BINANCE_FUTURES = "binance_futures"
+    YAHOO = "yahoo"
+
+
 class Quote(BaseModel):
     """공통 시세 스냅샷. 자산 종류와 무관하게 동일 스키마로 취급."""
 
@@ -60,5 +66,9 @@ class WatchTarget(BaseModel):
     symbol: str
     name: str
     currency: str
-    # API용 원본 티커 (예: 005930.KS, BTCUSDT)
+    # API용 원본 티커 (예: 005930.KS, BTCUSDT, SKHYUSDT)
     market_id: str
+    feed: DataFeed = DataFeed.BINANCE_SPOT
+
+    def uses_binance_klines(self) -> bool:
+        return self.feed in (DataFeed.BINANCE_SPOT, DataFeed.BINANCE_FUTURES)

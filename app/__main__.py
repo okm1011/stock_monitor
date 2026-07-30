@@ -52,8 +52,21 @@ def _build_table(quotes: list[Quote]) -> Table:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
+    from app.universe import resolve_watch_targets
+
     config = load_config(args.config)
     console.print(f"[bold]config:[/bold] {Path(args.config).resolve() if args.config else 'config.yaml'}")
+    if config.universe.enabled:
+        u = config.universe
+        console.print(
+            f"유니버스 ON - Binance {u.quote_asset}, "
+            f"{u.volume_lookback_days}일 거래량 상위 {u.top_percentile}% (max {u.max_symbols})"
+        )
+        targets = resolve_watch_targets(config, log=console.print, force_universe=False)
+        console.print(f"감시 심볼: {len(targets)}개 (예: {', '.join(t.symbol for t in targets[:8])}...)")
+        console.print("[green]OK[/green] - 유니버스 로드 성공 (시세 전체 검증은 `run`에서 수행)")
+        return 0
+
     console.print(
         f"감시 대상 - crypto={len(config.crypto)}, "
         f"kr={len(config.kr_stocks)}, us={len(config.us_stocks)}"

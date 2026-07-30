@@ -6,13 +6,11 @@ __pycache__/
 venv/
 .env
 
-# Data
-data/
+# Runtime data / caches (커밋하지 않음)
+data/*
+!data/.gitkeep
 *.db
-
-# Output
-*.json
-!package.json
+universe.json
 
 # IDE / OS
 .idea/

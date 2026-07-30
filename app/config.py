@@ -23,6 +23,8 @@ class CryptoSymbol(BaseModel):
 class StockSymbol(BaseModel):
     ticker: str
     name: str
+    # 예: SKHYUSDT — 설정 시 Yahoo 대신 Binance USDⓈ-M 선물 kline 사용
+    binance_futures: str | None = None
 
 
 class RsiConfig(BaseModel):
@@ -93,10 +95,34 @@ class HistoryConfig(BaseModel):
     db_path: str = "data/candles.db"
 
 
+class UniverseConfig(BaseModel):
+    """바이낸스 상장 페어 중 거래량 상위 %를 매일 갱신해 감시."""
+
+    enabled: bool = True
+    # binance_spot: 현물 USDT (코인). 주식/ETF는 바이낸스에 거의 없음.
+    source: Literal["binance_spot"] = "binance_spot"
+    quote_asset: str = "USDT"
+    volume_lookback_days: int = 7
+    top_percentile: float = 30.0  # 부하 크면 15
+    max_symbols: int = 60  # t3.micro 안전 상한
+    refresh_hours: float = 24.0
+    exclude_leveraged: bool = True
+    exclude_stablecoins: bool = True
+    include_static_stocks: bool = False  # True면 config의 kr/us 주식도 함께
+
+    @field_validator("top_percentile")
+    @classmethod
+    def _pct_ok(cls, v: float) -> float:
+        if not (1.0 <= v <= 100.0):
+            raise ValueError("universe.top_percentile must be 1..100")
+        return v
+
+
 class AppConfig(BaseModel):
     crypto: list[CryptoSymbol] = Field(default_factory=list)
     kr_stocks: list[StockSymbol] = Field(default_factory=list)
     us_stocks: list[StockSymbol] = Field(default_factory=list)
+    universe: UniverseConfig = Field(default_factory=UniverseConfig)
     poll_interval_seconds: float = 5.0
     timeframe: Timeframe = "1h"
     # 알람은 완성 봉 마감 기준
