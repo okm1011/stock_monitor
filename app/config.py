@@ -83,11 +83,46 @@ class BbSqueezeRuleConfig(BaseModel):
     squeeze_ratio: float = 0.05
 
 
+class VolumeSpikeRuleConfig(BaseModel):
+    """바이낸스 선물 전체 3분봉 거래량 급증 알람."""
+
+    enabled: bool = True
+    timeframe: Timeframe = "3m"
+    lookback: int = 20  # 직전 N봉 평균
+    multiplier: float = 3.0  # 최근 봉 >= 평균 * multiplier
+    poll_seconds: float = 180.0  # 조회 주기
+    cooldown_seconds: int = 600  # 심볼당 쿨다운 (기본 10분)
+    max_workers: int = 15
+    symbol_refresh_hours: float = 24.0
+
+    @field_validator("lookback")
+    @classmethod
+    def _lookback_ok(cls, v: int) -> int:
+        if v < 2:
+            raise ValueError("volume_spike.lookback must be >= 2")
+        return v
+
+    @field_validator("multiplier")
+    @classmethod
+    def _mult_ok(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("volume_spike.multiplier must be > 0")
+        return v
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 30:
+            raise ValueError("volume_spike.poll_seconds must be >= 30")
+        return v
+
+
 class RulesConfig(BaseModel):
     extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
     rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
     divergence: DivergenceRuleConfig = Field(default_factory=DivergenceRuleConfig)
     bb_squeeze: BbSqueezeRuleConfig = Field(default_factory=BbSqueezeRuleConfig)
+    volume_spike: VolumeSpikeRuleConfig = Field(default_factory=VolumeSpikeRuleConfig)
 
 
 class HistoryConfig(BaseModel):

@@ -15,6 +15,7 @@ from app.models import AssetClass, WatchTarget
 from app.settings import get_settings
 from app.storage import CandleStore
 from app.universe import BinanceUniverseService, resolve_watch_targets
+from app.volume_spike import FuturesVolumeSpikeWatcher
 
 
 console = Console(force_terminal=True, soft_wrap=True)
@@ -66,6 +67,7 @@ class Monitor:
         self._universe_svc = (
             BinanceUniverseService(config.universe) if config.universe.enabled else None
         )
+        self._volume_spike: FuturesVolumeSpikeWatcher | None = None
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
@@ -99,6 +101,8 @@ class Monitor:
                 pass
 
         enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
+        if self.config.rules.volume_spike.enabled:
+            enabled.append("volume_spike")
         self._log(
             f"모니터 시작 poll={self.config.poll_interval_seconds}s "
             f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
@@ -123,6 +127,17 @@ class Monitor:
 
         self._armed = True
         self._log("백필 완료 - 이후 새 봉 마감부터 알람 활성")
+
+        vs = self.config.rules.volume_spike
+        if vs.enabled:
+            self._volume_spike = FuturesVolumeSpikeWatcher(
+                cfg=vs,
+                notify=self.notifier.send,
+                log=self._log,
+            )
+            self._volume_spike.start()
+        else:
+            self._log("거래량 급증 알람: OFF")
 
         while not self._stop:
             loop_started = time.monotonic()
@@ -254,6 +269,9 @@ class Monitor:
             self._log(f"{ts} " + " | ".join(shown) + more)
 
     def _shutdown(self) -> None:
+        if self._volume_spike:
+            self._volume_spike.stop()
+            self._volume_spike = None
         self.price_fetcher.close()
         self.backfiller.close()
         if self._universe_svc:

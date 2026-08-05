@@ -64,6 +64,7 @@ atr:
 # 2) rsi_macd_cross  — RSI 이탈 + MACD 크로스
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
+# 5) volume_spike    — 선물 전체 3분봉 거래량 급증 (직전 N봉 평균 × multiplier)
 rules:
   extreme_rsi:
     enabled: true
@@ -85,6 +86,15 @@ rules:
   bb_squeeze:
     enabled: false
     squeeze_ratio: 0.05
+  volume_spike:
+    enabled: true
+    timeframe: 3m
+    lookback: 20
+    multiplier: 3.0
+    poll_seconds: 180
+    cooldown_seconds: 600   # 심볼당 10분
+    max_workers: 15
+    symbol_refresh_hours: 24
 
 alert_cooldown_seconds: 300
 history:
