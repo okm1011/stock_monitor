@@ -64,7 +64,7 @@ atr:
 # 2) rsi_macd_cross  — RSI 이탈 + MACD 크로스
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
-# 5) volume_spike    — 선물 전체 3분봉 거래량 급증 (직전 N봉 평균 × multiplier)
+# 5) volume_spike — 잡코인 펌프 초입 (가격급등∧거래량∧횡보∧메이저제외)
 rules:
   extreme_rsi:
     enabled: true
@@ -89,12 +89,45 @@ rules:
   volume_spike:
     enabled: true
     timeframe: 3m
-    lookback: 20
-    multiplier: 3.0
+    window_bars: 5          # 최근 15분 가격
+    min_price_pct: 15       # +15% 이상
+    volume_lookback: 20
+    volume_mult: 4.0        # 최신봉 거래량 ≥ 평균×4
+    quiet_bars: 40          # 직전 ~2시간 횡보
+    quiet_range_pct: 10     # 그 구간 고저 < 10%
     poll_seconds: 180
     cooldown_seconds: 600   # 심볼당 10분
     max_workers: 15
     symbol_refresh_hours: 24
+    exclude_bases:
+      - BTC
+      - ETH
+      - BNB
+      - SOL
+      - XRP
+      - DOGE
+      - ADA
+      - AVAX
+      - LINK
+      - DOT
+      - TRX
+      - LTC
+      - BCH
+      - NEAR
+      - SUI
+      - PEPE
+      - WLD
+      - UNI
+      - AAVE
+      - FIL
+      - TON
+      - SHIB
+      - APT
+      - ARB
+      - OP
+      - ATOM
+      - ICP
+      - HYPE
 
 alert_cooldown_seconds: 300
 history:

@@ -50,6 +50,9 @@ sudo systemctl status stock-monitor
 
 `Active: active (running)` 이면 성공.
 
+`status` 맨 아래 `lines ... (END)` 는 **멈춘 게 아니라 페이저**입니다. **`q`** 로 나가세요.
+(페이저 없이 보려면: `sudo systemctl status stock-monitor --no-pager`)
+
 실시간 로그:
 
 ```bash
@@ -57,6 +60,8 @@ journalctl -u stock-monitor -f
 ```
 
 `Ctrl+C` 로 로그만 끊기. SSH 종료는 `exit` (모니터는 계속 실행).
+
+> 재시작 직후엔 backfill 로그가 많이 나오고, 이후엔 상태(~15초) / 거래량 스캔(~3분) 간격이라 중간에 조용할 수 있습니다.
 
 ---
 
@@ -66,7 +71,7 @@ SSH 접속 후:
 
 ```bash
 sudo systemctl restart stock-monitor
-sudo systemctl status stock-monitor
+sudo systemctl status stock-monitor --no-pager
 ```
 
 | 명령 | 의미 |
@@ -74,7 +79,7 @@ sudo systemctl status stock-monitor
 | `sudo systemctl start stock-monitor` | 켜기 |
 | `sudo systemctl stop stock-monitor` | 끄기 |
 | `sudo systemctl restart stock-monitor` | 재시작 |
-| `sudo systemctl status stock-monitor` | 상태 |
+| `sudo systemctl status stock-monitor --no-pager` | 상태 (페이저 없음) |
 | `journalctl -u stock-monitor -n 50 --no-pager` | 최근 로그 |
 | `journalctl -u stock-monitor -f` | 실시간 로그 |
 

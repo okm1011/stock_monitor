@@ -65,6 +65,7 @@ class MonitorApp(tk.Tk):
         self.var_rule4 = tk.BooleanVar(value=False)
         self.var_rule5 = tk.BooleanVar(value=True)
         self.var_vs_mult = tk.StringVar()
+        self.var_vs_pct = tk.StringVar()
         self.var_vs_cd = tk.StringVar()
 
         self._build()
@@ -154,7 +155,7 @@ class MonitorApp(tk.Tk):
         tk.Checkbutton(toggles, text="2 RSI+MACD", variable=self.var_rule2, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
         tk.Checkbutton(toggles, text="3 다이버전스", variable=self.var_rule3, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
         tk.Checkbutton(toggles, text="4 BB스퀴즈", variable=self.var_rule4, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
-        tk.Checkbutton(toggles, text="5 거래량급증", variable=self.var_rule5, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT)
+        tk.Checkbutton(toggles, text="5 펌프초입", variable=self.var_rule5, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT)
         rcols = tk.Frame(rules, bg=CARD)
         rcols.pack(fill=tk.X)
         rc1 = tk.Frame(rcols, bg=CARD)
@@ -165,8 +166,9 @@ class MonitorApp(tk.Tk):
         self._field(rc1, "극단 RSI low", self.var_ext_lo)
         self._field(rc2, "크로스 oversold/ob", self.var_cross_os)
         self._field(rc2, "스퀴즈 비율", self.var_sq)
-        self._field(rc1, "거래량배수", self.var_vs_mult)
-        self._field(rc2, "거래량쿨다운(초)", self.var_vs_cd)
+        self._field(rc1, "펌프 가격%(15분)", self.var_vs_pct)
+        self._field(rc2, "펌프 거래량배수", self.var_vs_mult)
+        self._field(rc2, "펌프 쿨다운(초)", self.var_vs_cd)
 
         actions = tk.Frame(root, bg=BG)
         actions.pack(fill=tk.X, pady=(0, 10))
@@ -227,7 +229,8 @@ class MonitorApp(tk.Tk):
         self.var_rule3.set(cfg.rules.divergence.enabled)
         self.var_rule4.set(cfg.rules.bb_squeeze.enabled)
         self.var_rule5.set(cfg.rules.volume_spike.enabled)
-        self.var_vs_mult.set(str(cfg.rules.volume_spike.multiplier))
+        self.var_vs_mult.set(str(cfg.rules.volume_spike.volume_mult))
+        self.var_vs_pct.set(str(cfg.rules.volume_spike.min_price_pct))
         self.var_vs_cd.set(str(cfg.rules.volume_spike.cooldown_seconds))
         self._append_log(f"설정 로드 · {self.config_path}")
 
@@ -262,7 +265,8 @@ class MonitorApp(tk.Tk):
         data["rules"]["bb_squeeze"]["enabled"] = bool(self.var_rule4.get())
         data["rules"]["bb_squeeze"]["squeeze_ratio"] = float(self.var_sq.get().strip())
         data["rules"]["volume_spike"]["enabled"] = bool(self.var_rule5.get())
-        data["rules"]["volume_spike"]["multiplier"] = float(self.var_vs_mult.get().strip())
+        data["rules"]["volume_spike"]["volume_mult"] = float(self.var_vs_mult.get().strip())
+        data["rules"]["volume_spike"]["min_price_pct"] = float(self.var_vs_pct.get().strip())
         data["rules"]["volume_spike"]["cooldown_seconds"] = int(float(self.var_vs_cd.get().strip()))
         return AppConfig.model_validate(data)
 

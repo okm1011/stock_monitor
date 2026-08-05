@@ -137,7 +137,7 @@ class Monitor:
             )
             self._volume_spike.start()
         else:
-            self._log("거래량 급증 알람: OFF")
+            self._log("펌프 초입 알람: OFF")
 
         while not self._stop:
             loop_started = time.monotonic()

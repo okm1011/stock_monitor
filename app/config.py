@@ -84,29 +84,70 @@ class BbSqueezeRuleConfig(BaseModel):
 
 
 class VolumeSpikeRuleConfig(BaseModel):
-    """바이낸스 선물 전체 3분봉 거래량 급증 알람."""
+    """
+    잡코인 펌프 초입 알람 (1+2+3 필터 AND):
+    1) 최근 window_bars 동안 가격 min_price_pct% 이상 + 최신봉 거래량 volume_mult배
+    2) 그 직전 quiet_bars 동안 고저 폭이 quiet_range_pct% 이하 (바닥 횡보)
+    3) exclude_bases 메이저 제외, 선물 USDT 퍼페추얼 전체
+    """
 
     enabled: bool = True
     timeframe: Timeframe = "3m"
-    lookback: int = 20  # 직전 N봉 평균
-    multiplier: float = 3.0  # 최근 봉 >= 평균 * multiplier
-    poll_seconds: float = 180.0  # 조회 주기
-    cooldown_seconds: int = 600  # 심볼당 쿨다운 (기본 10분)
+    window_bars: int = 5  # 가격 급등 구간 (3m×5=15분)
+    min_price_pct: float = 15.0
+    volume_lookback: int = 20
+    volume_mult: float = 4.0
+    quiet_bars: int = 40  # 횡보 구간 (3m×40≈2시간)
+    quiet_range_pct: float = 10.0
+    cooldown_seconds: int = 600
+    poll_seconds: float = 180.0
     max_workers: int = 15
     symbol_refresh_hours: float = 24.0
+    exclude_bases: list[str] = Field(
+        default_factory=lambda: [
+            "BTC",
+            "ETH",
+            "BNB",
+            "SOL",
+            "XRP",
+            "DOGE",
+            "ADA",
+            "AVAX",
+            "LINK",
+            "DOT",
+            "TRX",
+            "LTC",
+            "BCH",
+            "NEAR",
+            "SUI",
+            "PEPE",
+            "WLD",
+            "UNI",
+            "AAVE",
+            "FIL",
+            "TON",
+            "SHIB",
+            "APT",
+            "ARB",
+            "OP",
+            "ATOM",
+            "ICP",
+            "HYPE",
+        ]
+    )
 
-    @field_validator("lookback")
+    @field_validator("window_bars", "volume_lookback", "quiet_bars")
     @classmethod
-    def _lookback_ok(cls, v: int) -> int:
+    def _bars_ok(cls, v: int) -> int:
         if v < 2:
-            raise ValueError("volume_spike.lookback must be >= 2")
+            raise ValueError("bar counts must be >= 2")
         return v
 
-    @field_validator("multiplier")
+    @field_validator("min_price_pct", "volume_mult", "quiet_range_pct")
     @classmethod
-    def _mult_ok(cls, v: float) -> float:
+    def _pos_ok(cls, v: float) -> float:
         if v <= 0:
-            raise ValueError("volume_spike.multiplier must be > 0")
+            raise ValueError("must be > 0")
         return v
 
     @field_validator("poll_seconds")
@@ -115,6 +156,10 @@ class VolumeSpikeRuleConfig(BaseModel):
         if v < 30:
             raise ValueError("volume_spike.poll_seconds must be >= 30")
         return v
+
+    @property
+    def history_bars(self) -> int:
+        return self.quiet_bars + self.window_bars + self.volume_lookback + 5
 
 
 class RulesConfig(BaseModel):

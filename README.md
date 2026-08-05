@@ -10,7 +10,7 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 # - rsi_macd_cross: RSI 이탈 + MACD 크로스
 # - divergence: 상/하강 다이버전스
 # - bb_squeeze: 볼린저 스퀴즈
-# - volume_spike: 바이낸스 선물 전체 3분봉 거래량 급증 (직전 20봉 평균 × N, 쿨다운 설정 가능)
+# - volume_spike: 잡코인 펌프 초입 (가격% ∧ 거래량 ∧ 횡보 ∧ 메이저제외)
 
 ---
 
@@ -236,18 +236,20 @@ signal_on_closed_bar: true
 rules:
   extreme_rsi:
     enabled: true
-  volume_spike:          # 선물 전체 3분봉 거래량 급증
+  volume_spike:          # 잡코인 펌프 초입 (1∧2∧3)
     enabled: true
     timeframe: 3m
-    lookback: 20
-    multiplier: 3.0
-    poll_seconds: 180
-    cooldown_seconds: 600  # 심볼당 10분
+    window_bars: 5
+    min_price_pct: 15
+    volume_mult: 4.0
+    quiet_bars: 40
+    quiet_range_pct: 10
+    cooldown_seconds: 600
 ```
 
 - RSI 등 기존 알람은 **1시간 봉** 마감 기준
-- `volume_spike`는 **선물 USDT 퍼페추얼 전체**를 별도 스레드로 3분마다 스캔 (최소 거래대금 필터 없음)
-- 같은 신호 반복은 각 규칙/심볼 쿨다운으로 제한
+- `volume_spike`는 선물 알트 **펌프 초입만** (메이저 제외, 횡보 후 +15%·거래량×4)
+- 같은 심볼 반복은 `cooldown_seconds`로 제한
 
 PC에서 UI로 보려면:
 
