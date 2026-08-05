@@ -62,13 +62,13 @@ class ExtremeRsiRuleConfig(BaseModel):
 
 
 class RsiMacdCrossRuleConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     oversold: float = 30.0
     overbought: float = 70.0
 
 
 class DivergenceRuleConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     oversold: float = 30.0
     overbought: float = 70.0
     lookback: int = 60
@@ -79,7 +79,7 @@ class DivergenceRuleConfig(BaseModel):
 
 
 class BbSqueezeRuleConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     squeeze_ratio: float = 0.05
 
 

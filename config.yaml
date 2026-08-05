@@ -59,17 +59,22 @@ atr:
   sl_mult: 1.5
   tp_mult: 3.0
 
+# 알람 규칙 on/off: enabled true/false
+# 1) extreme_rsi     — RSI 과매수/과매도
+# 2) rsi_macd_cross  — RSI 이탈 + MACD 크로스
+# 3) divergence      — 상/하강 다이버전스
+# 4) bb_squeeze      — 볼린저 스퀴즈 밴드
 rules:
   extreme_rsi:
     enabled: true
     high: 80.0
     low: 23.0
   rsi_macd_cross:
-    enabled: true
+    enabled: false
     oversold: 30.0
     overbought: 70.0
   divergence:
-    enabled: true
+    enabled: false
     oversold: 30.0
     overbought: 70.0
     lookback: 60
@@ -78,7 +83,7 @@ rules:
     use_rsi: true
     use_macd: true
   bb_squeeze:
-    enabled: true
+    enabled: false
     squeeze_ratio: 0.05
 
 alert_cooldown_seconds: 300

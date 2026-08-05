@@ -5,7 +5,11 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 
 - 코인: 바이낸스 현물 USDT, **7일 거래대금 상위 30%**(최대 60개), 매일 갱신
 - 주식/ETF: 바이낸스 USDⓈ-M 선물 (`config.yaml`의 `us_stocks` + `binance_futures`)
-- 규칙: extreme RSI / RSI+MACD / 다이버전스 / BB 스퀴즈
+# 알람 규칙 on/off (`config.yaml` rules.*.enabled)
+# - extreme_rsi: RSI 과매수/과매도
+# - rsi_macd_cross: RSI 이탈 + MACD 크로스
+# - divergence: 상/하강 다이버전스
+# - bb_squeeze: 볼린저 스퀴즈
 
 ---
 
