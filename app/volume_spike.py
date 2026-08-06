@@ -38,9 +38,11 @@ class _SymbolState:
 class FuturesVolumeSpikeWatcher:
     """
     잡코인 펌프 초입 (필터 1∧2∧3):
-    1) 최근 window 가격 급등 + 최신봉 거래량 배수
+    1) 최근 window 가격 급등 + 최신(형성 중 포함)봉 거래량 배수
     2) 직전 quiet 구간 횡보(고저 폭 제한)
     3) 메이저 제외한 선물 USDT 퍼페추얼
+
+    마감 봉을 기다리지 않고, 진행 중 봉의 현재가·누적 거래량으로 판정한다.
     """
 
     BASE = "https://fapi.binance.com"
@@ -92,11 +94,11 @@ class FuturesVolumeSpikeWatcher:
             return
 
         self._log(
-            f"펌프 초입 감시 시작 futures {self.cfg.timeframe} | "
+            f"펌프 초입 감시 시작 futures {self.cfg.timeframe} (형성중봉) | "
             f"price≥{self.cfg.min_price_pct:g}%/{self.cfg.window_bars}봉 + "
             f"vol×{self.cfg.volume_mult:g} | "
             f"quiet<{self.cfg.quiet_range_pct:g}%/{self.cfg.quiet_bars}봉 | "
-            f"cooldown={self.cfg.cooldown_seconds}s"
+            f"poll={self.cfg.poll_seconds:g}s cooldown={self.cfg.cooldown_seconds}s"
         )
 
         try:
@@ -187,7 +189,7 @@ class FuturesVolumeSpikeWatcher:
                 if done % 100 == 0:
                     self._log(f"  펌프 백필 {done}/{len(self._symbols)}")
 
-        self._log(f"펌프 초입 백필 완료: {hits}/{len(self._symbols)} (알람은 이후 새 봉부터)")
+        self._log(f"펌프 초입 백필 완료: {hits}/{len(self._symbols)} (알람은 형성 중 봉부터)")
 
     def _scan(self, interval: str) -> None:
         spiked = 0
@@ -206,6 +208,7 @@ class FuturesVolumeSpikeWatcher:
                 if not rows or len(rows) < 2:
                     continue
                 checked += 1
+                forming = rows[-1]
                 closed = rows[:-1]
                 st = self._states.setdefault(sym, self._new_state())
                 for bar in closed:
@@ -213,20 +216,28 @@ class FuturesVolumeSpikeWatcher:
                         continue
                     st.bars.append(bar)
                     st.last_closed_ot = bar.ot
-                    ok, meta = self._passes_filters(st)
-                    if not ok or not meta:
-                        continue
-                    if now_m - st.last_alert_mono < self.cfg.cooldown_seconds:
-                        continue
-                    self._emit(sym, meta)
-                    st.last_alert_mono = now_m
-                    spiked += 1
+
+                # 진행 중 봉만 판정 (마감 대기 없음)
+                if st.last_closed_ot is not None and forming.ot <= st.last_closed_ot:
+                    continue
+                ok, meta = self._passes_filters(st, forming)
+                if not ok or not meta:
+                    continue
+                if now_m - st.last_alert_mono < self.cfg.cooldown_seconds:
+                    continue
+                self._emit(sym, meta)
+                st.last_alert_mono = now_m
+                spiked += 1
 
         self._log(f"펌프 스캔: checked≈{checked} alerts={spiked}")
 
-    def _passes_filters(self, st: _SymbolState) -> tuple[bool, dict | None]:
+    def _passes_filters(
+        self, st: _SymbolState, forming: _Bar | None = None
+    ) -> tuple[bool, dict | None]:
         cfg = self.cfg
         bars = list(st.bars)
+        if forming is not None:
+            bars.append(forming)
         need = cfg.quiet_bars + cfg.window_bars
         if len(bars) < max(need, cfg.volume_lookback + 1):
             return False, None
@@ -245,7 +256,7 @@ class FuturesVolumeSpikeWatcher:
         if quiet_pct > cfg.quiet_range_pct:
             return False, None
 
-        # 1) 가격: window 직전 종가 대비 최신 종가
+        # 1) 가격: window 직전 종가 대비 최신(형성중) 현재가
         base_px = bars[-(cfg.window_bars + 1)].close
         last = window[-1]
         if base_px <= 0:
@@ -254,7 +265,7 @@ class FuturesVolumeSpikeWatcher:
         if price_pct < cfg.min_price_pct:
             return False, None
 
-        # 1) 거래량: 최신 봉 vs 직전 volume_lookback 평균
+        # 1) 거래량: 최신(형성중) 봉 누적 vs 직전 volume_lookback 평균
         prior = bars[-(cfg.volume_lookback + 1) : -1]
         if len(prior) < cfg.volume_lookback:
             return False, None

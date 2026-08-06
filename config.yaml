@@ -64,7 +64,7 @@ atr:
 # 2) rsi_macd_cross  — RSI 이탈 + MACD 크로스
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
-# 5) volume_spike — 잡코인 펌프 초입 (가격급등∧거래량∧횡보∧메이저제외)
+# 5) volume_spike — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
 rules:
   extreme_rsi:
     enabled: true
@@ -95,7 +95,7 @@ rules:
     volume_mult: 4.0        # 최신봉 거래량 ≥ 평균×4
     quiet_bars: 40          # 직전 ~2시간 횡보
     quiet_range_pct: 10     # 그 구간 고저 < 10%
-    poll_seconds: 180
+    poll_seconds: 30          # 형성중 봉 감시 주기
     cooldown_seconds: 600   # 심볼당 10분
     max_workers: 15
     symbol_refresh_hours: 24

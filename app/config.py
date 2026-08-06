@@ -85,7 +85,7 @@ class BbSqueezeRuleConfig(BaseModel):
 
 class VolumeSpikeRuleConfig(BaseModel):
     """
-    잡코인 펌프 초입 알람 (1+2+3 필터 AND):
+    잡코인 펌프 초입 알람 (1+2+3 필터 AND, 형성 중 봉 포함):
     1) 최근 window_bars 동안 가격 min_price_pct% 이상 + 최신봉 거래량 volume_mult배
     2) 그 직전 quiet_bars 동안 고저 폭이 quiet_range_pct% 이하 (바닥 횡보)
     3) exclude_bases 메이저 제외, 선물 USDT 퍼페추얼 전체
@@ -100,7 +100,7 @@ class VolumeSpikeRuleConfig(BaseModel):
     quiet_bars: int = 40  # 횡보 구간 (3m×40≈2시간)
     quiet_range_pct: float = 10.0
     cooldown_seconds: int = 600
-    poll_seconds: float = 180.0
+    poll_seconds: float = 30.0  # 형성 중 봉 감시 주기
     max_workers: int = 15
     symbol_refresh_hours: float = 24.0
     exclude_bases: list[str] = Field(
