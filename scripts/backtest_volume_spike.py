@@ -19,30 +19,39 @@ import httpx
 
 BASE = "https://fapi.binance.com"
 OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "backtests"
+CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_cache"
 INTERVAL = "3m"
 BAR_SEC = 180
 
-# config.yaml volume_spike 와 동일
-WINDOW_BARS = 5
-MIN_PRICE_PCT = 15.0
-VOLUME_LOOKBACK = 20
-VOLUME_MULT = 4.0
-QUIET_BARS = 40
-QUIET_RANGE_PCT = 10.0
-COOLDOWN_SEC = 600
+# config.yaml 과 동기화 (없으면 기본값)
+def _cfg():
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from app.config import load_config
+
+    return load_config().rules.volume_spike
+
+
+VS = _cfg()
+WINDOW_BARS = VS.window_bars
+MIN_PRICE_PCT = VS.min_price_pct
+VOLUME_LOOKBACK = VS.volume_lookback
+VOLUME_MULT = VS.volume_mult
+QUIET_BARS = VS.quiet_bars
+QUIET_RANGE_PCT = VS.quiet_range_pct
+COOLDOWN_SEC = VS.cooldown_seconds
+EXCLUDE_BASES = {b.upper() for b in VS.exclude_bases}
 
 # 데이터
 LOOKBACK_DAYS = 90
-MAX_WORKERS_FETCH = 12
+MAX_WORKERS_FETCH = 4  # API rate limit 완화
+FETCH_SLEEP = 0.15
 KLINE_LIMIT = 1500
 TAKER_FEE = 0.0004  # 편도
 MAX_HOLD_BARS = 160  # 8시간
-
-EXCLUDE_BASES = {
-    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT",
-    "TRX", "LTC", "BCH", "NEAR", "SUI", "PEPE", "WLD", "UNI", "AAVE", "FIL",
-    "TON", "SHIB", "APT", "ARB", "OP", "ATOM", "ICP", "HYPE",
-}
 
 # ROI(%) 기준 TP/SL — 마진 대비. 가격% = ROI / leverage
 LEVERAGES = [3, 5, 7, 10, 15, 20]
@@ -90,9 +99,36 @@ def list_symbols(client: httpx.Client) -> list[str]:
     return sorted(out)
 
 
+def _cache_path(symbol: str, start_ms: int, end_ms: int) -> Path:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / f"{symbol}_{start_ms}_{end_ms}.json"
+
+
+def _bars_from_cache(path: Path) -> list[Bar] | None:
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return [Bar(**b) for b in raw]
+    except Exception:
+        return None
+
+
+def _save_cache(path: Path, bars: list[Bar]) -> None:
+    path.write_text(
+        json.dumps([b.__dict__ for b in bars], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def fetch_klines(
     client: httpx.Client, symbol: str, start_ms: int, end_ms: int
 ) -> list[Bar]:
+    cache = _cache_path(symbol, start_ms, end_ms)
+    cached = _bars_from_cache(cache)
+    if cached is not None:
+        return cached
+
     rows: list[Bar] = []
     cursor = start_ms
     while cursor < end_ms:
@@ -108,12 +144,15 @@ def fetch_klines(
                         "limit": KLINE_LIMIT,
                     },
                 )
-                if resp.status_code == 429:
-                    time.sleep(1.5 * (attempt + 1))
+                if resp.status_code == 418 or resp.status_code == 429:
+                    time.sleep(3.0 * (attempt + 1))
                     continue
                 if resp.status_code >= 400:
                     return rows
                 batch = resp.json()
+                if isinstance(batch, dict) and batch.get("code"):
+                    time.sleep(3.0 * (attempt + 1))
+                    continue
                 break
             except Exception:
                 time.sleep(0.5 * (attempt + 1))
@@ -141,12 +180,15 @@ def fetch_klines(
         cursor = nxt
         if len(batch) < KLINE_LIMIT:
             break
-        time.sleep(0.05)
+        time.sleep(FETCH_SLEEP)
     # dedupe by ot
     by_ot: dict[int, Bar] = {}
     for b in rows:
         by_ot[b.ot] = b
-    return [by_ot[k] for k in sorted(by_ot)]
+    out = [by_ot[k] for k in sorted(by_ot)]
+    if out:
+        _save_cache(cache, out)
+    return out
 
 
 def detect_signals(symbol: str, bars: list[Bar]) -> list[Signal]:
@@ -344,6 +386,12 @@ def main() -> None:
 
     signals.sort(key=lambda x: x[0].ot)
     print(f"신호 수: {len(signals)}")
+    min_trades = 30
+    if len(signals) < min_trades:
+        print(
+            f"⚠️ 신호 {len(signals)}건 — 통계 신뢰도 낮음 (권장 ≥{min_trades}건). "
+            "API rate limit 시 data/backtest_cache 재사용 또는 몇 시간 후 재실행."
+        )
     if not signals:
         print("신호 없음 — 종료")
         return
