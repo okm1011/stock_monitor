@@ -90,7 +90,7 @@ rules:
     enabled: true
     timeframe: 3m
     window_bars: 5          # 최근 15분 가격
-    min_price_pct: 15       # +15% 이상
+    min_price_pct: 10       # +10% 이상 (형성 중 봉 포함)
     volume_lookback: 20
     volume_mult: 4.0        # 최신봉 거래량 ≥ 평균×4
     quiet_bars: 40          # 직전 ~2시간 횡보
