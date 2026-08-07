@@ -39,7 +39,7 @@ us_stocks:
     binance_futures: SNDKUSDT
 
 poll_interval_seconds: 5.0
-timeframe: 1h
+timeframe: 4h
 signal_on_closed_bar: true
 
 rsi:
