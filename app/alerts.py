@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any
 
 import httpx
@@ -30,22 +31,25 @@ class TelegramNotifier(Notifier):
         self.chat_id = str(chat_id).strip()
         self._url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         self._http = httpx.Client(timeout=timeout)
+        self._lock = Lock()
 
     def send(self, message: str) -> None:
-        resp = self._http.post(
-            self._url,
-            json={
-                "chat_id": self.chat_id,
-                "text": message,
-                "disable_web_page_preview": True,
-            },
-        )
-        if resp.status_code >= 400:
-            detail = resp.text[:300]
-            raise RuntimeError(f"Telegram send failed ({resp.status_code}): {detail}")
+        with self._lock:
+            resp = self._http.post(
+                self._url,
+                json={
+                    "chat_id": self.chat_id,
+                    "text": message,
+                    "disable_web_page_preview": True,
+                },
+            )
+            if resp.status_code >= 400:
+                detail = resp.text[:300]
+                raise RuntimeError(f"Telegram send failed ({resp.status_code}): {detail}")
 
     def close(self) -> None:
-        self._http.close()
+        with self._lock:
+            self._http.close()
 
 
 class MultiNotifier(Notifier):
@@ -142,6 +146,11 @@ class RuleEngine:
     _last_sent: dict[str, float] = field(default_factory=dict)
     _last_closed_ot: dict[str, int] = field(default_factory=dict)
 
+    def _is_live_rule(self, rule: AlertRule) -> bool:
+        if rule.id != "extreme_rsi":
+            return False
+        return bool(getattr(self.config.rules.extreme_rsi, "live", True))
+
     def evaluate_candles(
         self,
         target: WatchTarget,
@@ -149,36 +158,61 @@ class RuleEngine:
         *,
         allow_alert: bool = True,
     ) -> tuple[IndicatorContext | None, list[AlertEvent]]:
-        closed = [c for c in candles if c.closed] if self.config.signal_on_closed_bar else candles
+        if not candles:
+            return None, []
+
+        closed = [c for c in candles if c.closed] if self.config.signal_on_closed_bar else list(candles)
         if not closed:
             closed = candles[:-1] if len(candles) > 1 else []
-        ctx = build_context(target, self.config.timeframe, closed, self.config)
+
+        # 라이브 RSI: 형성 중 봉(미완성) 포함. 그 외 규칙은 완성 봉만.
+        live_candles = list(candles)
+        ctx_live = build_context(target, self.config.timeframe, live_candles, self.config)
+        ctx_closed = (
+            build_context(target, self.config.timeframe, closed, self.config)
+            if closed
+            else None
+        )
+        # 상태 표시는 라이브 우선
+        ctx = ctx_live or ctx_closed
         if ctx is None:
             return None, []
 
-        closed_ot = closed[-1].open_time
+        closed_ot = closed[-1].open_time if closed else live_candles[-1].open_time
         prev_ot = self._last_closed_ot.get(target.key)
         is_new_bar = prev_ot is None or closed_ot != prev_ot
         self._last_closed_ot[target.key] = closed_ot
 
         events: list[AlertEvent] = []
-        # 시작 백필 중에는 상태만 갱신하고 알람은 생략(폭주 방지)
-        if not allow_alert or not is_new_bar:
-            return ctx, events
-        # 첫 관측(백필 직후 첫 틱)도 알람 생략: prev_ot is None 이었던 경우
-        # allow_alert=True 이고 prev was None -> skip once by treating as arming
-        if prev_ot is None:
-            return ctx, events
-
-        price = ctx.last_close()
-        atr = ctx.last_atr()
         for rule in self.rules:
             if not rule.enabled(self.config):
                 continue
-            try:
-                signals = rule.evaluate(ctx, self.config)
-            except Exception:
+            live = self._is_live_rule(rule)
+            rule_ctx = ctx_live if live else ctx_closed
+            if rule_ctx is None:
                 continue
+
+            # 라이브 규칙은 매 틱 평가(상태 갱신). 완성봉 규칙은 새 봉일 때만.
+            if live:
+                try:
+                    signals = rule.evaluate(rule_ctx, self.config)
+                except Exception:
+                    continue
+                if not allow_alert:
+                    continue
+            else:
+                if not allow_alert or not is_new_bar:
+                    continue
+                # 첫 관측(백필 직후)은 알람 생략 — 상태만 무장
+                if prev_ot is None:
+                    continue
+                try:
+                    signals = rule.evaluate(rule_ctx, self.config)
+                except Exception:
+                    continue
+
+            price = rule_ctx.last_close()
+            atr = rule_ctx.last_atr()
             for sig in signals:
                 key = f"{target.key}:{sig.rule_id}:{sig.side}"
                 now = time.monotonic()

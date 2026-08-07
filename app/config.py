@@ -59,6 +59,8 @@ class ExtremeRsiRuleConfig(BaseModel):
     enabled: bool = True
     high: float = 80.0
     low: float = 23.0
+    # True: 형성 중 봉 + 실시간 가격으로 RSI 돌파 즉시 알람 (봉 마감 대기 안 함)
+    live: bool = True
 
 
 class RsiMacdCrossRuleConfig(BaseModel):

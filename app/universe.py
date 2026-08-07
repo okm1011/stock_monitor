@@ -6,11 +6,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import local
 
 import httpx
 
 from app.config import AppConfig, UniverseConfig, project_root
 from app.models import AssetClass, DataFeed, WatchTarget
+
+_thread_http = local()
 
 
 @dataclass
@@ -187,11 +190,18 @@ class BinanceUniverseService:
         result: dict[str, float] = {}
         days = max(1, min(days, 30))
 
+        def worker_http() -> httpx.Client:
+            client = getattr(_thread_http, "client", None)
+            if client is None:
+                client = httpx.Client(timeout=30.0)
+                _thread_http.client = client
+            return client
+
         def one(sym: str) -> tuple[str, float]:
-            # 재시도 간단
+            http = worker_http()
             for attempt in range(3):
                 try:
-                    resp = self._http.get(
+                    resp = http.get(
                         f"{self.BASE}/api/v3/klines",
                         params={"symbol": sym, "interval": "1d", "limit": days},
                     )

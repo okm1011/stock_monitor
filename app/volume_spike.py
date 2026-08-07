@@ -6,7 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from threading import Event, Thread
+from threading import Event, Thread, local
 
 import httpx
 
@@ -16,6 +16,7 @@ from app.timeframes import BINANCE_INTERVAL
 
 LogFn = Callable[[str], None]
 NotifyFn = Callable[[str], None]
+_thread_http = local()
 
 
 @dataclass
@@ -301,10 +302,19 @@ class FuturesVolumeSpikeWatcher:
             self._log(f"펌프 알람 전송 실패 {symbol}: {exc}")
         self._log(msg.replace("\n", " | "))
 
+    def _worker_http(self) -> httpx.Client:
+        """ThreadPool 워커별 Client (httpx.Client는 스레드 세이프하지 않음)."""
+        client = getattr(_thread_http, "client", None)
+        if client is None:
+            client = httpx.Client(timeout=30.0)
+            _thread_http.client = client
+        return client
+
     def _fetch_klines(self, symbol: str, interval: str, limit: int) -> list[_Bar] | None:
+        http = self._worker_http()
         for attempt in range(3):
             try:
-                resp = self._http.get(
+                resp = http.get(
                     f"{self.BASE}/fapi/v1/klines",
                     params={"symbol": symbol, "interval": interval, "limit": limit},
                 )

@@ -27,7 +27,7 @@ class IndicatorContext:
 
     @property
     def i(self) -> int:
-        """마지막 완성 봉 인덱스."""
+        """마지막 봉 인덱스 (라이브 규칙이면 형성 중 봉 포함)."""
         return len(self.candles) - 1
 
     def last_close(self) -> float:

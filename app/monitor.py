@@ -231,14 +231,10 @@ class Monitor:
         now = datetime.now(timezone.utc).timestamp()
 
         for t in self.targets:
-            if t.uses_binance_klines():
-                if t.key in prices:
-                    self._latest_price[t.key] = prices[t.key]
-                continue
-
             price = prices.get(t.key)
             if price is None:
                 continue
+            # 바이낸스/주식 모두 실시간 가격으로 형성 중 봉 갱신 → 라이브 RSI 돌파 가능
             updated = self.aggregators[t.key].update(price, now)
             self.store.upsert_many(updated)
             self._evaluate_target(t, allow_alert=True)

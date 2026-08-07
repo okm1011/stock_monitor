@@ -38,12 +38,12 @@ us_stocks:
     name: SanDisk
     binance_futures: SNDKUSDT
 
-poll_interval_seconds: 5.0
+poll_interval_seconds: 60.0
 timeframe: 4h
 signal_on_closed_bar: true
 
 rsi:
-  period: 7
+  period: 14
 
 macd:
   fast: 12
@@ -68,8 +68,9 @@ atr:
 rules:
   extreme_rsi:
     enabled: true
-    high: 80.0
+    high: 83.0
     low: 23.0
+    live: true            # 형성 중 4h봉에서도 RSI 돌파 즉시 알람
   rsi_macd_cross:
     enabled: false
     oversold: 30.0
