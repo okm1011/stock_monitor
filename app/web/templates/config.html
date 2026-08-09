@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}설정 · Stock Monitor{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div>
+    <h1>설정</h1>
+    <p class="sub" style="margin:0">저장만 하면 모니터가 수 초 내 자동 반영 (재시작 불필요)</p>
+  </div>
+  <div>
+    <span class="pill {% if status != 'active' %}off{% endif %}">{{ status }}</span>
+    <a class="btn btn-ghost" style="width:auto;padding:8px 12px;margin:0 0 0 6px;display:inline-block" href="/logout">로그아웃</a>
+  </div>
+</div>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+
+<form method="post" action="/config">
+  <div class="card">
+    <h2>공통</h2>
+    <div class="row">
+      <div>
+        <label>폴링 간격(초)</label>
+        <input type="number" step="any" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}" required />
+      </div>
+      <div>
+        <label>타임프레임</label>
+        <select name="timeframe">
+          {% for tf in timeframes %}
+          <option value="{{ tf }}" {% if cfg.timeframe == tf %}selected{% endif %}>{{ tf }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>알람 쿨다운(초)</label>
+        <input type="number" name="alert_cooldown_seconds" value="{{ cfg.alert_cooldown_seconds }}" required />
+      </div>
+      <div>
+        <label>상태 로그 간격(초)</label>
+        <input type="number" step="any" name="status_log_seconds" value="{{ cfg.status_log_seconds }}" required />
+      </div>
+    </div>
+    <label>RSI period</label>
+    <input type="number" name="rsi_period" value="{{ cfg.rsi.period }}" required />
+  </div>
+
+  <div class="card">
+    <h2>유니버스</h2>
+    <div class="row">
+      <div>
+        <label>상위 %</label>
+        <input type="number" step="any" name="universe_top_percentile" value="{{ cfg.universe.top_percentile }}" required />
+      </div>
+      <div>
+        <label>max symbols</label>
+        <input type="number" name="universe_max_symbols" value="{{ cfg.universe.max_symbols }}" required />
+      </div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="include_static_stocks" name="include_static_stocks" {% if cfg.universe.include_static_stocks %}checked{% endif %} />
+      <label for="include_static_stocks">고정 주식(us_stocks) 포함</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>규칙 on/off</h2>
+    <div class="check">
+      <input type="checkbox" id="extreme_rsi_enabled" name="extreme_rsi_enabled" {% if cfg.rules.extreme_rsi.enabled %}checked{% endif %} />
+      <label for="extreme_rsi_enabled">1 RSI 과매수/과매도</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>RSI high</label>
+        <input type="number" step="any" name="extreme_rsi_high" value="{{ cfg.rules.extreme_rsi.high }}" required />
+      </div>
+      <div>
+        <label>RSI low</label>
+        <input type="number" step="any" name="extreme_rsi_low" value="{{ cfg.rules.extreme_rsi.low }}" required />
+      </div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="extreme_rsi_live" name="extreme_rsi_live" {% if cfg.rules.extreme_rsi.live %}checked{% endif %} />
+      <label for="extreme_rsi_live">RSI 라이브(형성 중 봉)</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="rsi_macd_enabled" name="rsi_macd_enabled" {% if cfg.rules.rsi_macd_cross.enabled %}checked{% endif %} />
+      <label for="rsi_macd_enabled">2 RSI+MACD</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="divergence_enabled" name="divergence_enabled" {% if cfg.rules.divergence.enabled %}checked{% endif %} />
+      <label for="divergence_enabled">3 다이버전스</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="bb_squeeze_enabled" name="bb_squeeze_enabled" {% if cfg.rules.bb_squeeze.enabled %}checked{% endif %} />
+      <label for="bb_squeeze_enabled">4 BB 스퀴즈</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="volume_spike_enabled" name="volume_spike_enabled" {% if cfg.rules.volume_spike.enabled %}checked{% endif %} />
+      <label for="volume_spike_enabled">5 펌프 초입</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>펌프 초입 (5번)</h2>
+    <div class="row">
+      <div>
+        <label>가격 % (min)</label>
+        <input type="number" step="any" name="vs_min_price_pct" value="{{ cfg.rules.volume_spike.min_price_pct }}" required />
+      </div>
+      <div>
+        <label>거래량 배수</label>
+        <input type="number" step="any" name="vs_volume_mult" value="{{ cfg.rules.volume_spike.volume_mult }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>횡보 고저 %</label>
+        <input type="number" step="any" name="vs_quiet_range_pct" value="{{ cfg.rules.volume_spike.quiet_range_pct }}" required />
+      </div>
+      <div>
+        <label>폴링(초)</label>
+        <input type="number" step="any" name="vs_poll_seconds" value="{{ cfg.rules.volume_spike.poll_seconds }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>쿨다운(초)</label>
+        <input type="number" name="vs_cooldown_seconds" value="{{ cfg.rules.volume_spike.cooldown_seconds }}" required />
+      </div>
+      <div>
+        <label>window bars</label>
+        <input type="number" name="vs_window_bars" value="{{ cfg.rules.volume_spike.window_bars }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>volume lookback</label>
+        <input type="number" name="vs_volume_lookback" value="{{ cfg.rules.volume_spike.volume_lookback }}" required />
+      </div>
+      <div>
+        <label>quiet bars</label>
+        <input type="number" name="vs_quiet_bars" value="{{ cfg.rules.volume_spike.quiet_bars }}" required />
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" type="submit">저장</button>
+  </div>
+</form>
+
+<form method="post" action="/restart" style="margin-top:12px">
+  <button class="btn btn-danger" type="submit">모니터만 재시작 (문제 있을 때만)</button>
+</form>
+{% endblock %}

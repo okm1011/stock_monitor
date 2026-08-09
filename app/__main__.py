@@ -125,7 +125,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from app.monitor import Monitor
 
     config = load_config(args.config)
-    Monitor(config).start()
+    Monitor(config, config_path=args.config).start()
     return 0
 
 
@@ -161,6 +161,14 @@ def cmd_ui(args: argparse.Namespace) -> int:
     return run_ui(args.config)
 
 
+def cmd_config_web(args: argparse.Namespace) -> int:
+    """모바일/PC용 설정 웹 서버."""
+    from app.web.__main__ import main as web_main
+
+    web_main()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stock-monitor",
@@ -190,6 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     tg = sub.add_parser("telegram-test", help="텔레그램 테스트 메시지 전송")
     tg.set_defaults(func=cmd_telegram_test)
+
+    web = sub.add_parser("config-web", help="비밀번호 보호 설정 웹 (모바일/PC)")
+    web.set_defaults(func=cmd_config_web)
 
     return parser
 

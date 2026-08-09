@@ -11,8 +11,9 @@ PC에서 코드 수정 → GitHub → EC2 반영 → 서비스 재시작
 | SSH | `ssh -i C:\stock_monitor_key.pem ec2-user@13.209.65.145` |
 | 서버 경로 | `~/stock_monitor` (`/home/ec2-user/stock_monitor`) |
 | 서비스 | `stock-monitor` |
+| 설정 웹 | `http://13.209.65.145:8080` (`stock-monitor-web`) |
 
-> IP가 바뀌면 위 SSH 주소만 고치면 됩니다.
+> IP가 바뀌면 위 SSH 주소·웹 URL의 IP만 고치세요.
 
 ---
 
@@ -95,7 +96,66 @@ sudo systemctl status stock-monitor --no-pager
 
 ---
 
-## D. 한 줄 요약
+## D. 설정 웹 (모바일/PC에서 config 수정)
+
+브라우저로 `config.yaml`을 바꿉니다. 모니터가 **약 5초마다** 파일을 다시 읽어 반영하므로 재시작은 필요 없습니다.
+
+### 1) 서버 `.env`에 비밀번호 추가
+
+```bash
+cd ~/stock_monitor
+nano .env
+```
+
+```env
+CONFIG_WEB_PASSWORD=원하는비밀번호
+CONFIG_WEB_SECRET=아무긴랜덤문자열
+CONFIG_WEB_PORT=8080
+```
+
+### 2) 패키지 + sudo 권한 (재시작용, 한 번만)
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 비밀번호 없이 systemctl restart 허용
+sudo tee /etc/sudoers.d/stock-monitor <<'EOF'
+ec2-user ALL=(ALL) NOPASSWD: /bin/systemctl restart stock-monitor, /bin/systemctl status stock-monitor, /usr/bin/systemctl restart stock-monitor, /usr/bin/systemctl status stock-monitor
+EOF
+sudo chmod 440 /etc/sudoers.d/stock-monitor
+```
+
+### 3) systemd 등록
+
+```bash
+sudo cp ~/stock_monitor/deploy/stock-monitor-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stock-monitor-web
+sudo systemctl status stock-monitor-web --no-pager
+```
+
+### 4) AWS 보안 그룹
+
+인바운드 규칙 추가: **TCP 8080** → 내 IP(권장) 또는 `0.0.0.0/0`(비번만으로 보호, 비권장)
+
+### 5) 접속
+
+폰/PC 브라우저: `http://13.209.65.145:8080`  
+비밀번호 로그인 → 값 수정 → **저장** (수 초 내 자동 반영)
+
+| 명령 | 의미 |
+|------|------|
+| `sudo systemctl restart stock-monitor-web` | 설정 웹 재시작 |
+| `journalctl -u stock-monitor-web -f` | 웹 로그 |
+
+> `.env`의 비밀번호는 Git에 올리지 마세요.  
+> 저장 시 `config.yaml.bak` 백업이 생깁니다.
+
+---
+
+## E. 한 줄 요약
 
 **PC:** `git add .` → `git commit -m "..."` → `git push`  
-**서버:** `git pull` → (`pip install`) → `sudo systemctl restart stock-monitor`
+**서버:** `git pull` → (`pip install`) → `sudo systemctl restart stock-monitor`  
+**설정만 바꿀 때:** 웹 `http://서버IP:8080` → 저장 (자동 반영)

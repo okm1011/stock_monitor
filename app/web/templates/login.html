@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}로그인 · Stock Monitor{% endblock %}
+{% block body %}
+<div class="card" style="margin-top:48px">
+  <h1>Stock Monitor</h1>
+  <p class="sub">설정 변경 · 비밀번호 필요</p>
+  {% if error %}
+  <div class="flash err">{{ error }}</div>
+  {% endif %}
+  {% if not disabled %}
+  <form method="post" action="/login">
+    <label for="password">비밀번호</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+    <button class="btn btn-primary" type="submit">로그인</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

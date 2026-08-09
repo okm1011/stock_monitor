@@ -26,6 +26,7 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 | 키 파일 | `C:\stock_monitor_key.pem` |
 | 서버 경로 | `/home/ec2-user/stock_monitor` |
 | systemd 서비스 | `stock-monitor` |
+| 설정 웹 | `http://13.209.65.145:8080` (비밀번호, `stock-monitor-web`) |
 | Python | 서버 venv는 **3.11** 권장 (기본 3.9면 타입 에러 남) |
 
 > IP가 바뀌면 이 표와 아래 SSH 명령의 IP만 고치세요.
@@ -102,10 +103,12 @@ journalctl -u stock-monitor -f
 | 코드 (`app/`) | `commit` → `push` | `git pull` → `restart` |
 | `requirements.txt` | `commit` → `push` | `git pull` → **`pip install -r requirements.txt`** → `restart` |
 | `config.yaml` (PC에서 수정) | `commit` → `push` | `git pull` → `restart` |
-| `config.yaml` (서버에서만 임시 수정) | push 불필요 | `nano config.yaml` → `restart` |
+| `config.yaml` (서버에서만 임시 수정) | push 불필요 | `nano config.yaml` → `restart` 또는 **설정 웹** |
 | `.env` (텔레그램) | push **금지** | 서버에서만 `nano .env` → `restart` |
 
 한 줄 요약: **`git push`(PC) → `git pull` → `[pip]` → `systemctl restart`**
+
+**설정 웹:** 폰/PC 브라우저에서 `config.yaml` 저장 → 모니터가 수 초 내 자동 반영. 최초 세팅은 [DEPLOY.md § D](DEPLOY.md) 참고.
 
 ---
 

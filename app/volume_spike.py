@@ -65,6 +65,18 @@ class FuturesVolumeSpikeWatcher:
         self._symbols_loaded_at = 0.0
         self._exclude = {b.upper() for b in cfg.exclude_bases}
 
+    def apply_config(self, cfg: VolumeSpikeRuleConfig) -> None:
+        """실행 중 임계값·폴링 등만 핫스왑 (프로세스 재시작 없음)."""
+        prev_tf = self.cfg.timeframe
+        self.cfg = cfg
+        self._exclude = {b.upper() for b in cfg.exclude_bases}
+        # history_bars 변경 시 deque maxlen은 새 state부터 적용
+        if cfg.timeframe != prev_tf and self._thread and self._thread.is_alive():
+            self._log(
+                f"펌프 초입 timeframe {prev_tf}→{cfg.timeframe}: "
+                "다음 프로세스 재시작 시 완전 반영 (임계값은 즉시 적용)"
+            )
+
     def _new_state(self) -> _SymbolState:
         return _SymbolState(bars=deque(maxlen=self.cfg.history_bars))
 

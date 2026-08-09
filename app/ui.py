@@ -308,7 +308,13 @@ class MonitorApp(tk.Tk):
         def on_status(prices: dict, rsis: dict) -> None:
             self._status_queue.put((prices, rsis))
 
-        monitor = Monitor(cfg, on_log=on_log, on_status=on_status, register_signals=False)
+        monitor = Monitor(
+            cfg,
+            on_log=on_log,
+            on_status=on_status,
+            register_signals=False,
+            config_path=self.config_path,
+        )
         self._monitor = monitor
 
         def worker() -> None:

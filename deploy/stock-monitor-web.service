@@ -1,0 +1,15 @@
+[Unit]
+Description=Stock Monitor Config Web
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/stock_monitor
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ec2-user/stock_monitor/.venv/bin/python -m app config-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

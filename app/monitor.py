@@ -4,12 +4,13 @@ import signal
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
 from rich.console import Console
 
 from app.aggregator import CandleAggregator
 from app.alerts import Notifier, RuleEngine, build_notifier
-from app.config import AppConfig, resolve_db_path
+from app.config import AppConfig, default_config_path, load_config, resolve_db_path
 from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller
 from app.models import AssetClass, WatchTarget
 from app.settings import get_settings
@@ -22,6 +23,9 @@ console = Console(force_terminal=True, soft_wrap=True)
 LogFn = Callable[[str], None]
 StatusFn = Callable[[dict[str, float], dict[str, float | None]], None]
 
+# config.yaml mtime 검사 주기 (저장 후 대략 이 시간 안에 반영)
+CONFIG_RELOAD_SECONDS = 5.0
+
 
 class Monitor:
     """상시 모니터: 유니버스 갱신 -> 봉 수집 -> 규칙 엔진 -> 알림."""
@@ -33,8 +37,12 @@ class Monitor:
         on_log: LogFn | None = None,
         on_status: StatusFn | None = None,
         register_signals: bool = True,
+        config_path: str | Path | None = None,
     ) -> None:
         self.config = config
+        self._config_path = Path(config_path) if config_path else default_config_path()
+        self._config_mtime = self._file_mtime(self._config_path)
+        self._last_config_check = 0.0
         self.settings = get_settings()
         self.notifier = notifier or build_notifier(self.settings)
         self.on_log = on_log
@@ -56,12 +64,7 @@ class Monitor:
         self._latest_rsi: dict[str, float | None] = {}
         self._latest_price: dict[str, float] = {}
         self._armed = False
-        self._need = max(
-            config.history.max_candles,
-            config.macd.slow + config.macd.signal + 50,
-            config.bollinger.period + 50,
-            config.atr.period + 50,
-        )
+        self._need = self._calc_need(config)
         self._crypto_targets: list[WatchTarget] = []
         self._binance_klines_targets: list[WatchTarget] = []
         self._universe_svc = (
@@ -142,6 +145,7 @@ class Monitor:
         while not self._stop:
             loop_started = time.monotonic()
             try:
+                self._maybe_reload_config()
                 self._maybe_refresh_universe()
                 self._tick()
             except Exception as exc:
@@ -152,9 +156,112 @@ class Monitor:
             if sleep_for > 0:
                 end = time.monotonic() + sleep_for
                 while not self._stop and time.monotonic() < end:
+                    # 대기 중에도 config 변경을 빨리 감지
+                    self._maybe_reload_config()
                     time.sleep(min(0.2, end - time.monotonic()))
 
         self._shutdown()
+
+    @staticmethod
+    def _file_mtime(path: Path) -> float | None:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return None
+
+    @staticmethod
+    def _calc_need(config: AppConfig) -> int:
+        return max(
+            config.history.max_candles,
+            config.macd.slow + config.macd.signal + 50,
+            config.bollinger.period + 50,
+            config.atr.period + 50,
+        )
+
+    def _maybe_reload_config(self) -> None:
+        now = time.monotonic()
+        if now - self._last_config_check < CONFIG_RELOAD_SECONDS:
+            return
+        self._last_config_check = now
+        mtime = self._file_mtime(self._config_path)
+        if mtime is None or mtime == self._config_mtime:
+            return
+        try:
+            new_cfg = load_config(self._config_path)
+        except Exception as exc:
+            self._log(f"config reload 실패(기존 유지): {exc}")
+            self._config_mtime = mtime
+            return
+        self._apply_reloaded_config(new_cfg)
+        self._config_mtime = mtime
+
+    def _apply_reloaded_config(self, new_cfg: AppConfig) -> None:
+        old = self.config
+        tf_changed = old.timeframe != new_cfg.timeframe
+        universe_changed = (
+            old.universe.model_dump() != new_cfg.universe.model_dump()
+            or old.crypto != new_cfg.crypto
+            or old.us_stocks != new_cfg.us_stocks
+            or old.kr_stocks != new_cfg.kr_stocks
+        )
+
+        self.config = new_cfg
+        self.engine.config = new_cfg
+        self.engine.cooldown_seconds = new_cfg.alert_cooldown_seconds
+        self._need = self._calc_need(new_cfg)
+        self.price_fetcher._stock_min_interval = max(5.0, new_cfg.poll_interval_seconds)
+        self.store.max_candles = new_cfg.history.max_candles
+
+        if self._universe_svc is not None:
+            self._universe_svc.cfg = new_cfg.universe
+        elif new_cfg.universe.enabled:
+            self._universe_svc = BinanceUniverseService(new_cfg.universe)
+
+        self._sync_volume_spike(new_cfg)
+
+        if tf_changed:
+            self._log(f"timeframe 변경 {old.timeframe} → {new_cfg.timeframe}, 봉 재집계")
+            self.aggregators = {
+                t.key: CandleAggregator(t.key, new_cfg.timeframe) for t in self.targets
+            }
+            if self.targets:
+                self._backfill_targets(self.targets)
+
+        if universe_changed:
+            self._log("유니버스/심볼 설정 변경 → 목록 재계산")
+            try:
+                new_targets = resolve_watch_targets(
+                    self.config, log=self._log, force_universe=True
+                )
+                self._apply_targets(new_targets, backfill_new_only=True)
+            except Exception as exc:
+                self._log(f"심볼 목록 갱신 실패(기존 유지): {exc}")
+
+        enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
+        if self.config.rules.volume_spike.enabled:
+            enabled.append("volume_spike")
+        self._log(
+            f"config 반영 poll={new_cfg.poll_interval_seconds}s tf={new_cfg.timeframe} "
+            f"규칙={', '.join(enabled) if enabled else '(없음)'}"
+        )
+
+    def _sync_volume_spike(self, cfg: AppConfig) -> None:
+        vs = cfg.rules.volume_spike
+        if vs.enabled:
+            if self._volume_spike is None:
+                self._volume_spike = FuturesVolumeSpikeWatcher(
+                    cfg=vs,
+                    notify=self.notifier.send,
+                    log=self._log,
+                )
+                self._volume_spike.start()
+                return
+            self._volume_spike.apply_config(vs)
+            return
+        if self._volume_spike is not None:
+            self._volume_spike.stop()
+            self._volume_spike = None
+            self._log("펌프 초입 알람: OFF (config)")
 
     def _maybe_refresh_universe(self) -> None:
         if not self._universe_svc or not self._universe_svc.needs_refresh():

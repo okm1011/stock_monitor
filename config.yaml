@@ -130,7 +130,7 @@ rules:
       - ICP
       - HYPE
 
-alert_cooldown_seconds: 300
+alert_cooldown_seconds: 3600
 history:
   max_candles: 300
   db_path: data/candles.db
