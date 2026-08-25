@@ -119,6 +119,17 @@ def create_app() -> FastAPI:
         vs_window_bars: int = Form(...),
         vs_volume_lookback: int = Form(...),
         vs_quiet_bars: int = Form(...),
+        accumulation_enabled: str | None = Form(None),
+        acc_range_days: int = Form(...),
+        acc_range_pct: float = Form(...),
+        acc_oi_days: int = Form(...),
+        acc_oi_change_pct: float = Form(...),
+        acc_min_oi_usdt: float = Form(...),
+        acc_trend_days: int = Form(...),
+        acc_trend_min_pct: float = Form(...),
+        acc_trend_max_pct: float = Form(...),
+        acc_poll_seconds: float = Form(...),
+        acc_cooldown_seconds: int = Form(...),
         universe_top_percentile: float = Form(...),
         universe_max_symbols: int = Form(...),
         include_static_stocks: str | None = Form(None),
@@ -150,6 +161,17 @@ def create_app() -> FastAPI:
             data["rules"]["volume_spike"]["window_bars"] = int(vs_window_bars)
             data["rules"]["volume_spike"]["volume_lookback"] = int(vs_volume_lookback)
             data["rules"]["volume_spike"]["quiet_bars"] = int(vs_quiet_bars)
+            data["rules"]["accumulation"]["enabled"] = accumulation_enabled == "on"
+            data["rules"]["accumulation"]["range_days"] = int(acc_range_days)
+            data["rules"]["accumulation"]["range_pct"] = float(acc_range_pct)
+            data["rules"]["accumulation"]["oi_days"] = int(acc_oi_days)
+            data["rules"]["accumulation"]["oi_change_pct"] = float(acc_oi_change_pct)
+            data["rules"]["accumulation"]["min_oi_usdt"] = float(acc_min_oi_usdt)
+            data["rules"]["accumulation"]["trend_days"] = int(acc_trend_days)
+            data["rules"]["accumulation"]["trend_min_pct"] = float(acc_trend_min_pct)
+            data["rules"]["accumulation"]["trend_max_pct"] = float(acc_trend_max_pct)
+            data["rules"]["accumulation"]["poll_seconds"] = float(acc_poll_seconds)
+            data["rules"]["accumulation"]["cooldown_seconds"] = int(acc_cooldown_seconds)
             data["universe"]["top_percentile"] = float(universe_top_percentile)
             data["universe"]["max_symbols"] = int(universe_max_symbols)
             data["universe"]["include_static_stocks"] = include_static_stocks == "on"

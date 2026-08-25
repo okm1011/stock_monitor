@@ -85,6 +85,38 @@ class BbSqueezeRuleConfig(BaseModel):
     squeeze_ratio: float = 0.05
 
 
+DEFAULT_FUTURES_EXCLUDE_BASES = [
+    "BTC",
+    "ETH",
+    "BNB",
+    "SOL",
+    "XRP",
+    "DOGE",
+    "ADA",
+    "AVAX",
+    "LINK",
+    "DOT",
+    "TRX",
+    "LTC",
+    "BCH",
+    "NEAR",
+    "SUI",
+    "PEPE",
+    "WLD",
+    "UNI",
+    "AAVE",
+    "FIL",
+    "TON",
+    "SHIB",
+    "APT",
+    "ARB",
+    "OP",
+    "ATOM",
+    "ICP",
+    "HYPE",
+]
+
+
 class VolumeSpikeRuleConfig(BaseModel):
     """
     잡코인 펌프 초입 알람 (1+2+3 필터 AND, 형성 중 봉 포함):
@@ -105,38 +137,7 @@ class VolumeSpikeRuleConfig(BaseModel):
     poll_seconds: float = 30.0  # 형성 중 봉 감시 주기
     max_workers: int = 15
     symbol_refresh_hours: float = 24.0
-    exclude_bases: list[str] = Field(
-        default_factory=lambda: [
-            "BTC",
-            "ETH",
-            "BNB",
-            "SOL",
-            "XRP",
-            "DOGE",
-            "ADA",
-            "AVAX",
-            "LINK",
-            "DOT",
-            "TRX",
-            "LTC",
-            "BCH",
-            "NEAR",
-            "SUI",
-            "PEPE",
-            "WLD",
-            "UNI",
-            "AAVE",
-            "FIL",
-            "TON",
-            "SHIB",
-            "APT",
-            "ARB",
-            "OP",
-            "ATOM",
-            "ICP",
-            "HYPE",
-        ]
-    )
+    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
 
     @field_validator("window_bars", "volume_lookback", "quiet_bars")
     @classmethod
@@ -164,12 +165,61 @@ class VolumeSpikeRuleConfig(BaseModel):
         return self.quiet_bars + self.window_bars + self.volume_lookback + 5
 
 
+class AccumulationRuleConfig(BaseModel):
+    """
+    알트 매집 관심 알람 (펀딩 없음):
+    1) range_days 일봉 고저 < range_pct%
+    2) 같은 기간 달러 OI +oi_change_pct% 이상, 현재 OI ≥ min_oi_usdt
+    3) 최근 trend_days 수익률이 trend_min_pct ~ trend_max_pct (이미 펌프/급락 제외)
+    4) exclude_bases 메이저 제외, 선물 USDT 퍼페추얼
+    """
+
+    enabled: bool = True
+    range_days: int = 14
+    range_pct: float = 22.0
+    oi_days: int = 14
+    oi_change_pct: float = 25.0
+    min_oi_usdt: float = 2_000_000.0
+    trend_days: int = 7
+    trend_min_pct: float = -20.0
+    trend_max_pct: float = 25.0
+    cooldown_seconds: int = 86400
+    poll_seconds: float = 3600.0
+    max_workers: int = 8
+    symbol_refresh_hours: float = 24.0
+    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
+
+    @field_validator("range_days", "oi_days", "trend_days")
+    @classmethod
+    def _days_ok(cls, v: int) -> int:
+        if v < 3:
+            raise ValueError("day counts must be >= 3")
+        if v > 30:
+            raise ValueError("OI/range lookback max 30 (Binance hist is ~1 month)")
+        return v
+
+    @field_validator("range_pct", "oi_change_pct", "min_oi_usdt")
+    @classmethod
+    def _pos_ok(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("must be > 0")
+        return v
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 300:
+            raise ValueError("accumulation.poll_seconds must be >= 300")
+        return v
+
+
 class RulesConfig(BaseModel):
     extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
     rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
     divergence: DivergenceRuleConfig = Field(default_factory=DivergenceRuleConfig)
     bb_squeeze: BbSqueezeRuleConfig = Field(default_factory=BbSqueezeRuleConfig)
     volume_spike: VolumeSpikeRuleConfig = Field(default_factory=VolumeSpikeRuleConfig)
+    accumulation: AccumulationRuleConfig = Field(default_factory=AccumulationRuleConfig)
 
 
 class HistoryConfig(BaseModel):

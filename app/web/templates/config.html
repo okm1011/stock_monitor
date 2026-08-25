@@ -100,6 +100,10 @@
       <input type="checkbox" id="volume_spike_enabled" name="volume_spike_enabled" {% if cfg.rules.volume_spike.enabled %}checked{% endif %} />
       <label for="volume_spike_enabled">5 펌프 초입</label>
     </div>
+    <div class="check">
+      <input type="checkbox" id="accumulation_enabled" name="accumulation_enabled" {% if cfg.rules.accumulation.enabled %}checked{% endif %} />
+      <label for="accumulation_enabled">6 매집 관심 (횡보+OI)</label>
+    </div>
   </div>
 
   <div class="card">
@@ -142,6 +146,60 @@
       <div>
         <label>quiet bars</label>
         <input type="number" name="vs_quiet_bars" value="{{ cfg.rules.volume_spike.quiet_bars }}" required />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>매집 관심 (6번) · 펀딩 없음</h2>
+    <div class="row">
+      <div>
+        <label>횡보 일수</label>
+        <input type="number" name="acc_range_days" value="{{ cfg.rules.accumulation.range_days }}" required />
+      </div>
+      <div>
+        <label>횡보 고저 %</label>
+        <input type="number" step="any" name="acc_range_pct" value="{{ cfg.rules.accumulation.range_pct }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>OI 일수</label>
+        <input type="number" name="acc_oi_days" value="{{ cfg.rules.accumulation.oi_days }}" required />
+      </div>
+      <div>
+        <label>OI 상승 %</label>
+        <input type="number" step="any" name="acc_oi_change_pct" value="{{ cfg.rules.accumulation.oi_change_pct }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>최소 OI (USDT)</label>
+        <input type="number" step="any" name="acc_min_oi_usdt" value="{{ cfg.rules.accumulation.min_oi_usdt }}" required />
+      </div>
+      <div>
+        <label>추세 일수</label>
+        <input type="number" name="acc_trend_days" value="{{ cfg.rules.accumulation.trend_days }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>7일 수익률 하한 %</label>
+        <input type="number" step="any" name="acc_trend_min_pct" value="{{ cfg.rules.accumulation.trend_min_pct }}" required />
+      </div>
+      <div>
+        <label>7일 수익률 상한 %</label>
+        <input type="number" step="any" name="acc_trend_max_pct" value="{{ cfg.rules.accumulation.trend_max_pct }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>폴링(초)</label>
+        <input type="number" step="any" name="acc_poll_seconds" value="{{ cfg.rules.accumulation.poll_seconds }}" required />
+      </div>
+      <div>
+        <label>쿨다운(초)</label>
+        <input type="number" name="acc_cooldown_seconds" value="{{ cfg.rules.accumulation.cooldown_seconds }}" required />
       </div>
     </div>
   </div>

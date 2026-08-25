@@ -64,7 +64,8 @@ atr:
 # 2) rsi_macd_cross  — RSI 이탈 + MACD 크로스
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
-# 5) volume_spike — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
+# 5) volume_spike    — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
+# 6) accumulation    — 매집 관심 (14일 횡보 ∧ 달러 OI 상승 ∧ 최근 급등/급락 제외)
 rules:
   extreme_rsi:
     enabled: true
@@ -129,6 +130,20 @@ rules:
       - ATOM
       - ICP
       - HYPE
+  accumulation:
+    enabled: true
+    range_days: 14          # 횡보 구간
+    range_pct: 22           # 14일 고저 < 22%
+    oi_days: 14
+    oi_change_pct: 25       # 달러 OI +25% 이상
+    min_oi_usdt: 2000000    # 현재 OI 명목 ≥ 200만
+    trend_days: 7
+    trend_min_pct: -20      # 7일 수익률 하한
+    trend_max_pct: 25       # 이미 펌프된 놈 제외
+    poll_seconds: 3600      # 1시간마다
+    cooldown_seconds: 86400 # 심볼당 24시간
+    max_workers: 8
+    symbol_refresh_hours: 24
 
 alert_cooldown_seconds: 3600
 history:

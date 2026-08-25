@@ -11,6 +11,7 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 # - divergence: 상/하강 다이버전스
 # - bb_squeeze: 볼린저 스퀴즈
 # - volume_spike: 잡코인 펌프 초입 (가격% ∧ 거래량 ∧ 횡보 ∧ 메이저제외)
+# - accumulation: 매집 관심 (14일 횡보 ∧ 달러 OI 상승 ∧ 최근 급등/급락 제외)
 
 ---
 
@@ -248,10 +249,18 @@ rules:
     quiet_bars: 40
     quiet_range_pct: 10
     cooldown_seconds: 600
+  accumulation:          # 매집 관심 (횡보 ∧ OI↑)
+    enabled: true
+    range_days: 14
+    range_pct: 22
+    oi_change_pct: 25
+    min_oi_usdt: 2000000
+    cooldown_seconds: 86400
 ```
 
 - RSI 등 기존 알람은 **1시간 봉** 마감 기준
 - `volume_spike`는 선물 알트 **펌프 초입만** (메이저 제외, 횡보 후 +15%·거래량×4)
+- `accumulation`은 선물 알트 **매집 관심** (14일 고저 <22% ∧ 달러 OI +25% ∧ 최소 OI 200만, 1시간마다)
 - 같은 심볼 반복은 `cooldown_seconds`로 제한
 
 PC에서 UI로 보려면:

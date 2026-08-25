@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from app.accumulation import FuturesAccumulationWatcher
 from app.aggregator import CandleAggregator
 from app.alerts import Notifier, RuleEngine, build_notifier
 from app.config import AppConfig, default_config_path, load_config, resolve_db_path
@@ -71,6 +72,7 @@ class Monitor:
             BinanceUniverseService(config.universe) if config.universe.enabled else None
         )
         self._volume_spike: FuturesVolumeSpikeWatcher | None = None
+        self._accumulation: FuturesAccumulationWatcher | None = None
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
@@ -106,6 +108,8 @@ class Monitor:
         enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
+        if self.config.rules.accumulation.enabled:
+            enabled.append("accumulation")
         self._log(
             f"모니터 시작 poll={self.config.poll_interval_seconds}s "
             f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
@@ -141,6 +145,17 @@ class Monitor:
             self._volume_spike.start()
         else:
             self._log("펌프 초입 알람: OFF")
+
+        acc = self.config.rules.accumulation
+        if acc.enabled:
+            self._accumulation = FuturesAccumulationWatcher(
+                cfg=acc,
+                notify=self.notifier.send,
+                log=self._log,
+            )
+            self._accumulation.start()
+        else:
+            self._log("매집 관심 알람: OFF")
 
         while not self._stop:
             loop_started = time.monotonic()
@@ -218,6 +233,7 @@ class Monitor:
             self._universe_svc = BinanceUniverseService(new_cfg.universe)
 
         self._sync_volume_spike(new_cfg)
+        self._sync_accumulation(new_cfg)
 
         if tf_changed:
             self._log(f"timeframe 변경 {old.timeframe} → {new_cfg.timeframe}, 봉 재집계")
@@ -240,6 +256,8 @@ class Monitor:
         enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
+        if self.config.rules.accumulation.enabled:
+            enabled.append("accumulation")
         self._log(
             f"config 반영 poll={new_cfg.poll_interval_seconds}s tf={new_cfg.timeframe} "
             f"규칙={', '.join(enabled) if enabled else '(없음)'}"
@@ -262,6 +280,24 @@ class Monitor:
             self._volume_spike.stop()
             self._volume_spike = None
             self._log("펌프 초입 알람: OFF (config)")
+
+    def _sync_accumulation(self, cfg: AppConfig) -> None:
+        acc = cfg.rules.accumulation
+        if acc.enabled:
+            if self._accumulation is None:
+                self._accumulation = FuturesAccumulationWatcher(
+                    cfg=acc,
+                    notify=self.notifier.send,
+                    log=self._log,
+                )
+                self._accumulation.start()
+                return
+            self._accumulation.apply_config(acc)
+            return
+        if self._accumulation is not None:
+            self._accumulation.stop()
+            self._accumulation = None
+            self._log("매집 관심 알람: OFF (config)")
 
     def _maybe_refresh_universe(self) -> None:
         if not self._universe_svc or not self._universe_svc.needs_refresh():
@@ -375,6 +411,9 @@ class Monitor:
         if self._volume_spike:
             self._volume_spike.stop()
             self._volume_spike = None
+        if self._accumulation:
+            self._accumulation.stop()
+            self._accumulation = None
         self.price_fetcher.close()
         self.backfiller.close()
         if self._universe_svc:
