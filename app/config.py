@@ -178,7 +178,7 @@ class AccumulationRuleConfig(BaseModel):
     알트코인 신호 1 — OI 변동 (프리랠리 관심, 펀딩 없음).
 
     게이트: 아직 수직 펌프 아님 + 최소 OI + 스테이블/메이저 제외.
-    신호 2개 이상 (단, OI↑ 또는 거래량 재유입 중 1개는 필수):
+    신호: **OI↑ 필수** + (타이트 박스 / 거래량 회복 / BTC 대비 강세) 중 1개 이상.
       - tight: 14일 고저가 타이트
       - oi: 7일 달러 OI 상승
       - vol: 최근 거래량이 직전 평균 대비 회복
@@ -187,19 +187,19 @@ class AccumulationRuleConfig(BaseModel):
 
     enabled: bool = True
     range_days: int = 14
-    range_pct: float = 40.0  # 게이트: 이미 수직으로 간 차트 제외
-    tight_range_pct: float = 28.0  # 신호: 타이트 박스
+    range_pct: float = 38.0  # 게이트: 이미 수직으로 간 차트 제외
+    tight_range_pct: float = 26.0  # 신호: 타이트 박스
     oi_days: int = 7
-    oi_change_pct: float = 12.0
-    min_oi_usdt: float = 1_000_000.0
+    oi_change_pct: float = 15.0
+    min_oi_usdt: float = 1_500_000.0
     trend_days: int = 7
     trend_min_pct: float = -30.0
     trend_max_pct: float = 22.0
     vol_recent_bars: int = 3
     vol_lookback: int = 10
-    vol_mult: float = 1.35
-    btc_rs_pct: float = 4.0  # alt_7d - btc_7d (0이면 RS 신호 끔)
-    cooldown_seconds: int = 86400
+    vol_mult: float = 1.4
+    btc_rs_pct: float = 4.5  # alt_7d - btc_7d (0이면 RS 신호 끔)
+    cooldown_seconds: int = 86400  # 24h
     poll_seconds: float = 3600.0
     max_workers: int = 8
     symbol_refresh_hours: float = 24.0
@@ -238,13 +238,13 @@ class AbsorptionBarRuleConfig(BaseModel):
 
     enabled: bool = True
     timeframe: Timeframe = "4h"
-    wick_ratio: float = 0.55  # 윗꼬리 / (고-저)
-    max_body_ratio: float = 0.30  # 몸통 / (고-저)
-    max_close_pct: float = 3.5  # |종가-전봉종가| %
-    min_range_pct: float = 1.2  # 봉 자체 고저가 너무 작으면 제외
+    wick_ratio: float = 0.62  # 윗꼬리 / (고-저)
+    max_body_ratio: float = 0.25  # 몸통 / (고-저)
+    max_close_pct: float = 2.5  # |종가-전봉종가| %
+    min_range_pct: float = 1.8  # 봉 자체 고저가 너무 작으면 제외
     volume_lookback: int = 20
-    volume_mult: float = 2.5
-    cooldown_seconds: int = 14400  # 같은 4h봉 중복 방지
+    volume_mult: float = 3.5
+    cooldown_seconds: int = 28800  # 8h, 연속 4h봉 중복 완화
     poll_seconds: float = 60.0
     max_workers: int = 10
     symbol_refresh_hours: float = 24.0

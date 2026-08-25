@@ -252,25 +252,27 @@ rules:
     cooldown_seconds: 600
   accumulation:          # 알트 신호 1 OI 변동
     enabled: true
-    range_pct: 40
-    tight_range_pct: 28
-    oi_change_pct: 12
-    vol_mult: 1.35
-    btc_rs_pct: 4
-    min_oi_usdt: 1000000
+    range_pct: 38
+    tight_range_pct: 26
+    oi_change_pct: 15
+    vol_mult: 1.4
+    btc_rs_pct: 4.5
+    min_oi_usdt: 1500000
     cooldown_seconds: 86400
   absorption_bar:        # 알트 신호 2 매집봉
     enabled: true
     timeframe: 4h
-    wick_ratio: 0.55
-    max_body_ratio: 0.30
-    max_close_pct: 3.5
-    volume_mult: 2.5
+    wick_ratio: 0.62
+    max_body_ratio: 0.25
+    max_close_pct: 2.5
+    min_range_pct: 1.8
+    volume_mult: 3.5
+    cooldown_seconds: 28800
 ```
 
 - RSI 등 기존 알람은 **1시간 봉** 마감 기준
 - `volume_spike`는 선물 알트 **펌프 초입만** (메이저 제외, 횡보 후 +15%·거래량×4)
-- `accumulation`은 **알트 신호 1**: 아직 안 터진 알트 중 OI↑ 또는 거래량 회복 + 박스/BTC강세
+- `accumulation`은 **알트 신호 1**: 아직 안 터진 알트 중 **OI↑ 필수** + 박스/거래량/BTC강세 중 1개
 - `absorption_bar`는 **알트 신호 2**: 4h 매집봉 (윗꼬리 + 거래량, 종가는 거의 안 움직임)
 - 같은 심볼 반복은 `cooldown_seconds`로 제한
 

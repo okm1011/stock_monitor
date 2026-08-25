@@ -40,7 +40,7 @@ class _SymState:
 class FuturesAccumulationWatcher:
     """
     프리랠리 관심: 아직 안 터진 알트 중에서
-    (OI↑ 또는 거래량 회복) + (타이트 박스 또는 BTC 대비 상대강도).
+    OI↑ 필수 + (타이트 박스 / 거래량 회복 / BTC 대비 상대강도) 중 1개 이상.
     """
 
     BASE = "https://fapi.binance.com"
@@ -93,7 +93,7 @@ class FuturesAccumulationWatcher:
             f"알트 신호1 OI 감시 시작 futures 1d | "
             f"gate range<{self.cfg.range_pct:g}%/{self.cfg.range_days}d "
             f"tight<{self.cfg.tight_range_pct:g}% "
-            f"OI≥+{self.cfg.oi_change_pct:g}%/{self.cfg.oi_days}d "
+            f"OI≥+{self.cfg.oi_change_pct:g}%/{self.cfg.oi_days}d (필수) "
             f"vol×{self.cfg.vol_mult:g} RS≥{self.cfg.btc_rs_pct:g}% vs BTC | "
             f"minOI={_fmt_vol(self.cfg.min_oi_usdt)} "
             f"7d {self.cfg.trend_min_pct:g}~{self.cfg.trend_max_pct:g}% | "
@@ -272,9 +272,9 @@ class FuturesAccumulationWatcher:
         vol_ok = vol_x >= cfg.vol_mult
         rs_ok = rs_pct is not None and cfg.btc_rs_pct > 0 and rs_pct >= cfg.btc_rs_pct
 
-        flow_n = int(oi_ok) + int(vol_ok)
-        struct_n = int(tight_ok) + int(rs_ok)
-        if flow_n < 1 or flow_n + struct_n < 2:
+        if not oi_ok:
+            return False, None
+        if not (tight_ok or vol_ok or rs_ok):
             return False, None
 
         flags = [n for n, ok in (("tight", tight_ok), ("oi", oi_ok), ("vol", vol_ok), ("rs", rs_ok)) if ok]
