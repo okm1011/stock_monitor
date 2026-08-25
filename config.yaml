@@ -65,7 +65,8 @@ atr:
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
 # 5) volume_spike    — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
-# 6) accumulation    — 매집 관심 (14일 횡보 ∧ 달러 OI 상승 ∧ 최근 급등/급락 제외)
+# 6) accumulation    — 알트코인 신호 1 OI 변동
+# 7) absorption_bar  — 알트코인 신호 2 매집봉 (윗꼬리+거래량, 종가는 안 움직임)
 rules:
   extreme_rsi:
     enabled: true
@@ -130,19 +131,40 @@ rules:
       - ATOM
       - ICP
       - HYPE
+      - USDC
+      - FDUSD
+      - TUSD
+      - DAI
+      - USDE
   accumulation:
     enabled: true
-    range_days: 14          # 횡보 구간
-    range_pct: 22           # 14일 고저 < 22%
-    oi_days: 14
-    oi_change_pct: 25       # 달러 OI +25% 이상
-    min_oi_usdt: 2000000    # 현재 OI 명목 ≥ 200만
+    range_days: 14
+    range_pct: 40           # 게이트: 이미 수직 펌프인 차트 제외
+    tight_range_pct: 28     # 신호: 타이트 박스
+    oi_days: 7
+    oi_change_pct: 12       # 7일 달러 OI
+    min_oi_usdt: 1000000
     trend_days: 7
-    trend_min_pct: -20      # 7일 수익률 하한
-    trend_max_pct: 25       # 이미 펌프된 놈 제외
-    poll_seconds: 3600      # 1시간마다
-    cooldown_seconds: 86400 # 심볼당 24시간
+    trend_min_pct: -30
+    trend_max_pct: 22
+    vol_mult: 1.35          # 최근 3일 거래량 / 직전 10일 평균
+    btc_rs_pct: 4           # 7일 수익률이 BTC보다 이만큼 강함
+    poll_seconds: 3600
+    cooldown_seconds: 86400
     max_workers: 8
+    symbol_refresh_hours: 24
+  absorption_bar:
+    enabled: true
+    timeframe: 4h           # 형성 중 봉 포함
+    wick_ratio: 0.55        # 윗꼬리 / 고저
+    max_body_ratio: 0.30    # 몸통 / 고저
+    max_close_pct: 3.5      # 전봉 대비 종가 변화
+    min_range_pct: 1.2      # 너무 작은 봉 제외
+    volume_lookback: 20
+    volume_mult: 2.5
+    poll_seconds: 60
+    cooldown_seconds: 14400 # 같은 4h봉 중복 방지
+    max_workers: 10
     symbol_refresh_hours: 24
 
 alert_cooldown_seconds: 3600

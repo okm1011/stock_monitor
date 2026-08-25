@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from app.absorption import FuturesAbsorptionBarWatcher
 from app.accumulation import FuturesAccumulationWatcher
 from app.aggregator import CandleAggregator
 from app.alerts import Notifier, RuleEngine, build_notifier
@@ -73,6 +74,7 @@ class Monitor:
         )
         self._volume_spike: FuturesVolumeSpikeWatcher | None = None
         self._accumulation: FuturesAccumulationWatcher | None = None
+        self._absorption: FuturesAbsorptionBarWatcher | None = None
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
@@ -109,7 +111,9 @@ class Monitor:
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
         if self.config.rules.accumulation.enabled:
-            enabled.append("accumulation")
+            enabled.append("alt_oi")
+        if self.config.rules.absorption_bar.enabled:
+            enabled.append("alt_absorption")
         self._log(
             f"모니터 시작 poll={self.config.poll_interval_seconds}s "
             f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
@@ -155,7 +159,18 @@ class Monitor:
             )
             self._accumulation.start()
         else:
-            self._log("매집 관심 알람: OFF")
+            self._log("알트 신호1 OI: OFF")
+
+        ab = self.config.rules.absorption_bar
+        if ab.enabled:
+            self._absorption = FuturesAbsorptionBarWatcher(
+                cfg=ab,
+                notify=self.notifier.send,
+                log=self._log,
+            )
+            self._absorption.start()
+        else:
+            self._log("알트 신호2 매집봉: OFF")
 
         while not self._stop:
             loop_started = time.monotonic()
@@ -234,6 +249,7 @@ class Monitor:
 
         self._sync_volume_spike(new_cfg)
         self._sync_accumulation(new_cfg)
+        self._sync_absorption(new_cfg)
 
         if tf_changed:
             self._log(f"timeframe 변경 {old.timeframe} → {new_cfg.timeframe}, 봉 재집계")
@@ -257,7 +273,9 @@ class Monitor:
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
         if self.config.rules.accumulation.enabled:
-            enabled.append("accumulation")
+            enabled.append("alt_oi")
+        if self.config.rules.absorption_bar.enabled:
+            enabled.append("alt_absorption")
         self._log(
             f"config 반영 poll={new_cfg.poll_interval_seconds}s tf={new_cfg.timeframe} "
             f"규칙={', '.join(enabled) if enabled else '(없음)'}"
@@ -297,7 +315,25 @@ class Monitor:
         if self._accumulation is not None:
             self._accumulation.stop()
             self._accumulation = None
-            self._log("매집 관심 알람: OFF (config)")
+            self._log("알트 신호1 OI: OFF (config)")
+
+    def _sync_absorption(self, cfg: AppConfig) -> None:
+        ab = cfg.rules.absorption_bar
+        if ab.enabled:
+            if self._absorption is None:
+                self._absorption = FuturesAbsorptionBarWatcher(
+                    cfg=ab,
+                    notify=self.notifier.send,
+                    log=self._log,
+                )
+                self._absorption.start()
+                return
+            self._absorption.apply_config(ab)
+            return
+        if self._absorption is not None:
+            self._absorption.stop()
+            self._absorption = None
+            self._log("알트 신호2 매집봉: OFF (config)")
 
     def _maybe_refresh_universe(self) -> None:
         if not self._universe_svc or not self._universe_svc.needs_refresh():
@@ -414,6 +450,9 @@ class Monitor:
         if self._accumulation:
             self._accumulation.stop()
             self._accumulation = None
+        if self._absorption:
+            self._absorption.stop()
+            self._absorption = None
         self.price_fetcher.close()
         self.backfiller.close()
         if self._universe_svc:

@@ -102,7 +102,11 @@
     </div>
     <div class="check">
       <input type="checkbox" id="accumulation_enabled" name="accumulation_enabled" {% if cfg.rules.accumulation.enabled %}checked{% endif %} />
-      <label for="accumulation_enabled">6 매집 관심 (횡보+OI)</label>
+      <label for="accumulation_enabled">알트코인 신호 1 · OI 변동</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="absorption_bar_enabled" name="absorption_bar_enabled" {% if cfg.rules.absorption_bar.enabled %}checked{% endif %} />
+      <label for="absorption_bar_enabled">알트코인 신호 2 · 매집봉</label>
     </div>
   </div>
 
@@ -151,15 +155,26 @@
   </div>
 
   <div class="card">
-    <h2>매집 관심 (6번) · 펀딩 없음</h2>
+    <h2>알트코인 신호 1 · OI 변동</h2>
+    <p class="sub">아직 안 터진 알트 + (OI↑ 또는 거래량 회복) + (타이트 박스 또는 BTC 대비 강세)</p>
     <div class="row">
       <div>
         <label>횡보 일수</label>
         <input type="number" name="acc_range_days" value="{{ cfg.rules.accumulation.range_days }}" required />
       </div>
       <div>
-        <label>횡보 고저 %</label>
+        <label>펌프 제외 고저 % (게이트)</label>
         <input type="number" step="any" name="acc_range_pct" value="{{ cfg.rules.accumulation.range_pct }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>타이트 박스 %</label>
+        <input type="number" step="any" name="acc_tight_range_pct" value="{{ cfg.rules.accumulation.tight_range_pct }}" required />
+      </div>
+      <div>
+        <label>거래량 회복 배수</label>
+        <input type="number" step="any" name="acc_vol_mult" value="{{ cfg.rules.accumulation.vol_mult }}" required />
       </div>
     </div>
     <div class="row">
@@ -194,12 +209,64 @@
     </div>
     <div class="row">
       <div>
+        <label>BTC 대비 상대강도 %</label>
+        <input type="number" step="any" name="acc_btc_rs_pct" value="{{ cfg.rules.accumulation.btc_rs_pct }}" required />
+      </div>
+      <div>
         <label>폴링(초)</label>
         <input type="number" step="any" name="acc_poll_seconds" value="{{ cfg.rules.accumulation.poll_seconds }}" required />
       </div>
+    </div>
+    <div class="row">
       <div>
         <label>쿨다운(초)</label>
         <input type="number" name="acc_cooldown_seconds" value="{{ cfg.rules.accumulation.cooldown_seconds }}" required />
+      </div>
+      <div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>알트코인 신호 2 · 매집봉</h2>
+    <p class="sub">윗꼬리 김 + 거래량 급증 + 종가는 거의 안 움직임 (4h 형성 중 봉)</p>
+    <div class="row">
+      <div>
+        <label>윗꼬리 비율 (0~1)</label>
+        <input type="number" step="any" name="ab_wick_ratio" value="{{ cfg.rules.absorption_bar.wick_ratio }}" required />
+      </div>
+      <div>
+        <label>최대 몸통 비율</label>
+        <input type="number" step="any" name="ab_max_body_ratio" value="{{ cfg.rules.absorption_bar.max_body_ratio }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>종가 변화 상한 %</label>
+        <input type="number" step="any" name="ab_max_close_pct" value="{{ cfg.rules.absorption_bar.max_close_pct }}" required />
+      </div>
+      <div>
+        <label>최소 봉 고저 %</label>
+        <input type="number" step="any" name="ab_min_range_pct" value="{{ cfg.rules.absorption_bar.min_range_pct }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>거래량 배수</label>
+        <input type="number" step="any" name="ab_volume_mult" value="{{ cfg.rules.absorption_bar.volume_mult }}" required />
+      </div>
+      <div>
+        <label>volume lookback</label>
+        <input type="number" name="ab_volume_lookback" value="{{ cfg.rules.absorption_bar.volume_lookback }}" required />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>폴링(초)</label>
+        <input type="number" step="any" name="ab_poll_seconds" value="{{ cfg.rules.absorption_bar.poll_seconds }}" required />
+      </div>
+      <div>
+        <label>쿨다운(초)</label>
+        <input type="number" name="ab_cooldown_seconds" value="{{ cfg.rules.absorption_bar.cooldown_seconds }}" required />
       </div>
     </div>
   </div>

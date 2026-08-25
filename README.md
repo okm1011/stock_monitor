@@ -11,7 +11,8 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 # - divergence: 상/하강 다이버전스
 # - bb_squeeze: 볼린저 스퀴즈
 # - volume_spike: 잡코인 펌프 초입 (가격% ∧ 거래량 ∧ 횡보 ∧ 메이저제외)
-# - accumulation: 매집 관심 (14일 횡보 ∧ 달러 OI 상승 ∧ 최근 급등/급락 제외)
+# - accumulation: 알트코인 신호 1 OI 변동
+# - absorption_bar: 알트코인 신호 2 매집봉 (윗꼬리+거래량, 종가 거의 고정)
 
 ---
 
@@ -249,18 +250,28 @@ rules:
     quiet_bars: 40
     quiet_range_pct: 10
     cooldown_seconds: 600
-  accumulation:          # 매집 관심 (횡보 ∧ OI↑)
+  accumulation:          # 알트 신호 1 OI 변동
     enabled: true
-    range_days: 14
-    range_pct: 22
-    oi_change_pct: 25
-    min_oi_usdt: 2000000
+    range_pct: 40
+    tight_range_pct: 28
+    oi_change_pct: 12
+    vol_mult: 1.35
+    btc_rs_pct: 4
+    min_oi_usdt: 1000000
     cooldown_seconds: 86400
+  absorption_bar:        # 알트 신호 2 매집봉
+    enabled: true
+    timeframe: 4h
+    wick_ratio: 0.55
+    max_body_ratio: 0.30
+    max_close_pct: 3.5
+    volume_mult: 2.5
 ```
 
 - RSI 등 기존 알람은 **1시간 봉** 마감 기준
 - `volume_spike`는 선물 알트 **펌프 초입만** (메이저 제외, 횡보 후 +15%·거래량×4)
-- `accumulation`은 선물 알트 **매집 관심** (14일 고저 <22% ∧ 달러 OI +25% ∧ 최소 OI 200만, 1시간마다)
+- `accumulation`은 **알트 신호 1**: 아직 안 터진 알트 중 OI↑ 또는 거래량 회복 + 박스/BTC강세
+- `absorption_bar`는 **알트 신호 2**: 4h 매집봉 (윗꼬리 + 거래량, 종가는 거의 안 움직임)
 - 같은 심볼 반복은 `cooldown_seconds`로 제한
 
 PC에서 UI로 보려면:

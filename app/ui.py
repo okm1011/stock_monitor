@@ -65,6 +65,7 @@ class MonitorApp(tk.Tk):
         self.var_rule4 = tk.BooleanVar(value=False)
         self.var_rule5 = tk.BooleanVar(value=True)
         self.var_rule6 = tk.BooleanVar(value=True)
+        self.var_rule7 = tk.BooleanVar(value=True)
         self.var_vs_mult = tk.StringVar()
         self.var_vs_pct = tk.StringVar()
         self.var_vs_cd = tk.StringVar()
@@ -157,7 +158,8 @@ class MonitorApp(tk.Tk):
         tk.Checkbutton(toggles, text="3 다이버전스", variable=self.var_rule3, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
         tk.Checkbutton(toggles, text="4 BB스퀴즈", variable=self.var_rule4, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
         tk.Checkbutton(toggles, text="5 펌프초입", variable=self.var_rule5, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
-        tk.Checkbutton(toggles, text="6 매집", variable=self.var_rule6, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT)
+        tk.Checkbutton(toggles, text="알트OI", variable=self.var_rule6, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT, padx=(0, 12))
+        tk.Checkbutton(toggles, text="매집봉", variable=self.var_rule7, bg=CARD, fg=TEXT, activebackground=CARD).pack(side=tk.LEFT)
         rcols = tk.Frame(rules, bg=CARD)
         rcols.pack(fill=tk.X)
         rc1 = tk.Frame(rcols, bg=CARD)
@@ -232,6 +234,7 @@ class MonitorApp(tk.Tk):
         self.var_rule4.set(cfg.rules.bb_squeeze.enabled)
         self.var_rule5.set(cfg.rules.volume_spike.enabled)
         self.var_rule6.set(cfg.rules.accumulation.enabled)
+        self.var_rule7.set(cfg.rules.absorption_bar.enabled)
         self.var_vs_mult.set(str(cfg.rules.volume_spike.volume_mult))
         self.var_vs_pct.set(str(cfg.rules.volume_spike.min_price_pct))
         self.var_vs_cd.set(str(cfg.rules.volume_spike.cooldown_seconds))
@@ -272,6 +275,7 @@ class MonitorApp(tk.Tk):
         data["rules"]["volume_spike"]["min_price_pct"] = float(self.var_vs_pct.get().strip())
         data["rules"]["volume_spike"]["cooldown_seconds"] = int(float(self.var_vs_cd.get().strip()))
         data["rules"]["accumulation"]["enabled"] = bool(self.var_rule6.get())
+        data["rules"]["absorption_bar"]["enabled"] = bool(self.var_rule7.get())
         return AppConfig.model_validate(data)
 
     def _save(self) -> None:

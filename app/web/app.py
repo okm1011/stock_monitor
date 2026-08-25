@@ -128,8 +128,20 @@ def create_app() -> FastAPI:
         acc_trend_days: int = Form(...),
         acc_trend_min_pct: float = Form(...),
         acc_trend_max_pct: float = Form(...),
+        acc_vol_mult: float = Form(...),
+        acc_tight_range_pct: float = Form(...),
+        acc_btc_rs_pct: float = Form(...),
         acc_poll_seconds: float = Form(...),
         acc_cooldown_seconds: int = Form(...),
+        absorption_bar_enabled: str | None = Form(None),
+        ab_wick_ratio: float = Form(...),
+        ab_max_body_ratio: float = Form(...),
+        ab_max_close_pct: float = Form(...),
+        ab_min_range_pct: float = Form(...),
+        ab_volume_mult: float = Form(...),
+        ab_volume_lookback: int = Form(...),
+        ab_poll_seconds: float = Form(...),
+        ab_cooldown_seconds: int = Form(...),
         universe_top_percentile: float = Form(...),
         universe_max_symbols: int = Form(...),
         include_static_stocks: str | None = Form(None),
@@ -170,8 +182,20 @@ def create_app() -> FastAPI:
             data["rules"]["accumulation"]["trend_days"] = int(acc_trend_days)
             data["rules"]["accumulation"]["trend_min_pct"] = float(acc_trend_min_pct)
             data["rules"]["accumulation"]["trend_max_pct"] = float(acc_trend_max_pct)
+            data["rules"]["accumulation"]["vol_mult"] = float(acc_vol_mult)
+            data["rules"]["accumulation"]["tight_range_pct"] = float(acc_tight_range_pct)
+            data["rules"]["accumulation"]["btc_rs_pct"] = float(acc_btc_rs_pct)
             data["rules"]["accumulation"]["poll_seconds"] = float(acc_poll_seconds)
             data["rules"]["accumulation"]["cooldown_seconds"] = int(acc_cooldown_seconds)
+            data["rules"]["absorption_bar"]["enabled"] = absorption_bar_enabled == "on"
+            data["rules"]["absorption_bar"]["wick_ratio"] = float(ab_wick_ratio)
+            data["rules"]["absorption_bar"]["max_body_ratio"] = float(ab_max_body_ratio)
+            data["rules"]["absorption_bar"]["max_close_pct"] = float(ab_max_close_pct)
+            data["rules"]["absorption_bar"]["min_range_pct"] = float(ab_min_range_pct)
+            data["rules"]["absorption_bar"]["volume_mult"] = float(ab_volume_mult)
+            data["rules"]["absorption_bar"]["volume_lookback"] = int(ab_volume_lookback)
+            data["rules"]["absorption_bar"]["poll_seconds"] = float(ab_poll_seconds)
+            data["rules"]["absorption_bar"]["cooldown_seconds"] = int(ab_cooldown_seconds)
             data["universe"]["top_percentile"] = float(universe_top_percentile)
             data["universe"]["max_symbols"] = int(universe_max_symbols)
             data["universe"]["include_static_stocks"] = include_static_stocks == "on"

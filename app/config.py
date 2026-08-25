@@ -114,6 +114,14 @@ DEFAULT_FUTURES_EXCLUDE_BASES = [
     "ATOM",
     "ICP",
     "HYPE",
+    "USDC",
+    "FDUSD",
+    "TUSD",
+    "DAI",
+    "USDE",
+    "USDP",
+    "BUSD",
+    "PYUSD",
 ]
 
 
@@ -167,38 +175,46 @@ class VolumeSpikeRuleConfig(BaseModel):
 
 class AccumulationRuleConfig(BaseModel):
     """
-    알트 매집 관심 알람 (펀딩 없음):
-    1) range_days 일봉 고저 < range_pct%
-    2) 같은 기간 달러 OI +oi_change_pct% 이상, 현재 OI ≥ min_oi_usdt
-    3) 최근 trend_days 수익률이 trend_min_pct ~ trend_max_pct (이미 펌프/급락 제외)
-    4) exclude_bases 메이저 제외, 선물 USDT 퍼페추얼
+    알트코인 신호 1 — OI 변동 (프리랠리 관심, 펀딩 없음).
+
+    게이트: 아직 수직 펌프 아님 + 최소 OI + 스테이블/메이저 제외.
+    신호 2개 이상 (단, OI↑ 또는 거래량 재유입 중 1개는 필수):
+      - tight: 14일 고저가 타이트
+      - oi: 7일 달러 OI 상승
+      - vol: 최근 거래량이 직전 평균 대비 회복
+      - rs: 같은 기간 BTC보다 덜 빠지거나 더 강함
     """
 
     enabled: bool = True
     range_days: int = 14
-    range_pct: float = 22.0
-    oi_days: int = 14
-    oi_change_pct: float = 25.0
-    min_oi_usdt: float = 2_000_000.0
+    range_pct: float = 40.0  # 게이트: 이미 수직으로 간 차트 제외
+    tight_range_pct: float = 28.0  # 신호: 타이트 박스
+    oi_days: int = 7
+    oi_change_pct: float = 12.0
+    min_oi_usdt: float = 1_000_000.0
     trend_days: int = 7
-    trend_min_pct: float = -20.0
-    trend_max_pct: float = 25.0
+    trend_min_pct: float = -30.0
+    trend_max_pct: float = 22.0
+    vol_recent_bars: int = 3
+    vol_lookback: int = 10
+    vol_mult: float = 1.35
+    btc_rs_pct: float = 4.0  # alt_7d - btc_7d (0이면 RS 신호 끔)
     cooldown_seconds: int = 86400
     poll_seconds: float = 3600.0
     max_workers: int = 8
     symbol_refresh_hours: float = 24.0
     exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
 
-    @field_validator("range_days", "oi_days", "trend_days")
+    @field_validator("range_days", "oi_days", "trend_days", "vol_recent_bars", "vol_lookback")
     @classmethod
     def _days_ok(cls, v: int) -> int:
-        if v < 3:
-            raise ValueError("day counts must be >= 3")
+        if v < 2:
+            raise ValueError("counts must be >= 2")
         if v > 30:
-            raise ValueError("OI/range lookback max 30 (Binance hist is ~1 month)")
+            raise ValueError("lookback max 30 (Binance hist is ~1 month)")
         return v
 
-    @field_validator("range_pct", "oi_change_pct", "min_oi_usdt")
+    @field_validator("range_pct", "tight_range_pct", "oi_change_pct", "min_oi_usdt", "vol_mult")
     @classmethod
     def _pos_ok(cls, v: float) -> float:
         if v <= 0:
@@ -213,6 +229,56 @@ class AccumulationRuleConfig(BaseModel):
         return v
 
 
+class AbsorptionBarRuleConfig(BaseModel):
+    """
+    알트코인 신호 2 — 매집봉(흡수봉):
+    윗꼬리 김 + 거래량 급증 + 종가는 거의 안 움직임.
+    형성 중 봉 포함, 메이저/스테이블 제외 선물 USDT 퍼페추얼.
+    """
+
+    enabled: bool = True
+    timeframe: Timeframe = "4h"
+    wick_ratio: float = 0.55  # 윗꼬리 / (고-저)
+    max_body_ratio: float = 0.30  # 몸통 / (고-저)
+    max_close_pct: float = 3.5  # |종가-전봉종가| %
+    min_range_pct: float = 1.2  # 봉 자체 고저가 너무 작으면 제외
+    volume_lookback: int = 20
+    volume_mult: float = 2.5
+    cooldown_seconds: int = 14400  # 같은 4h봉 중복 방지
+    poll_seconds: float = 60.0
+    max_workers: int = 10
+    symbol_refresh_hours: float = 24.0
+    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
+
+    @field_validator("volume_lookback")
+    @classmethod
+    def _lookback_ok(cls, v: int) -> int:
+        if v < 5:
+            raise ValueError("volume_lookback must be >= 5")
+        return v
+
+    @field_validator("wick_ratio", "max_body_ratio")
+    @classmethod
+    def _ratio_ok(cls, v: float) -> float:
+        if not (0.05 <= v <= 0.95):
+            raise ValueError("ratio must be 0.05..0.95")
+        return v
+
+    @field_validator("max_close_pct", "min_range_pct", "volume_mult")
+    @classmethod
+    def _pos_ok(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("must be > 0")
+        return v
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 30:
+            raise ValueError("absorption_bar.poll_seconds must be >= 30")
+        return v
+
+
 class RulesConfig(BaseModel):
     extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
     rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
@@ -220,6 +286,7 @@ class RulesConfig(BaseModel):
     bb_squeeze: BbSqueezeRuleConfig = Field(default_factory=BbSqueezeRuleConfig)
     volume_spike: VolumeSpikeRuleConfig = Field(default_factory=VolumeSpikeRuleConfig)
     accumulation: AccumulationRuleConfig = Field(default_factory=AccumulationRuleConfig)
+    absorption_bar: AbsorptionBarRuleConfig = Field(default_factory=AbsorptionBarRuleConfig)
 
 
 class HistoryConfig(BaseModel):

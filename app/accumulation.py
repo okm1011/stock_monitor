@@ -23,6 +23,7 @@ class _Bar:
     high: float
     low: float
     close: float
+    qvol: float
 
 
 @dataclass
@@ -38,8 +39,8 @@ class _SymState:
 
 class FuturesAccumulationWatcher:
     """
-    바닥 횡보 + 달러 OI 상승 알트 (매집 관심).
-    메이저 제외 USDT-M 퍼페추얼, 1d 봉 + OI 히스토리.
+    프리랠리 관심: 아직 안 터진 알트 중에서
+    (OI↑ 또는 거래량 회복) + (타이트 박스 또는 BTC 대비 상대강도).
     """
 
     BASE = "https://fapi.binance.com"
@@ -68,7 +69,7 @@ class FuturesAccumulationWatcher:
 
     def start(self) -> None:
         if not self.cfg.enabled:
-            self._log("매집 관심 알람: OFF")
+            self._log("알트 신호1 OI: OFF")
             return
         if self._thread and self._thread.is_alive():
             return
@@ -89,17 +90,19 @@ class FuturesAccumulationWatcher:
 
     def _run(self) -> None:
         self._log(
-            f"매집 관심 감시 시작 futures 1d | "
-            f"range<{self.cfg.range_pct:g}%/{self.cfg.range_days}d + "
+            f"알트 신호1 OI 감시 시작 futures 1d | "
+            f"gate range<{self.cfg.range_pct:g}%/{self.cfg.range_days}d "
+            f"tight<{self.cfg.tight_range_pct:g}% "
             f"OI≥+{self.cfg.oi_change_pct:g}%/{self.cfg.oi_days}d "
-            f"minOI={_fmt_vol(self.cfg.min_oi_usdt)} | "
+            f"vol×{self.cfg.vol_mult:g} RS≥{self.cfg.btc_rs_pct:g}% vs BTC | "
+            f"minOI={_fmt_vol(self.cfg.min_oi_usdt)} "
             f"7d {self.cfg.trend_min_pct:g}~{self.cfg.trend_max_pct:g}% | "
             f"poll={self.cfg.poll_seconds:g}s cooldown={self.cfg.cooldown_seconds}s"
         )
         try:
             self._ensure_symbols(force=True)
         except Exception as exc:
-            self._log(f"매집 관심 초기화 실패: {exc}")
+            self._log(f"알트 신호1 초기화 실패: {exc}")
 
         while not self._stop.is_set():
             started = time.monotonic()
@@ -108,7 +111,7 @@ class FuturesAccumulationWatcher:
                     self._ensure_symbols(force=False)
                     self._scan()
             except Exception as exc:
-                self._log(f"매집 스캔 오류: {exc}")
+                self._log(f"알트 신호1 스캔 오류: {exc}")
 
             wait = self.cfg.poll_seconds - (time.monotonic() - started)
             end = time.monotonic() + max(1.0, wait)
@@ -150,8 +153,8 @@ class FuturesAccumulationWatcher:
             if key not in alive:
                 del self._states[key]
         self._log(
-            f"매집 관심 대상: {len(symbols)}개 "
-            f"(메이저 제외 {skipped}개, exclude={len(self._exclude)})"
+            f"알트 신호1 대상: {len(symbols)}개 "
+            f"(메이저/스테이블 제외 {skipped}개, exclude={len(self._exclude)})"
         )
 
     def _scan(self) -> None:
@@ -160,11 +163,17 @@ class FuturesAccumulationWatcher:
         hits = 0
         alerted = 0
         skip_notify = self._skip_first_alerts
-        need_klines = max(self.cfg.range_days, self.cfg.trend_days + 1) + 2
+        need_klines = max(
+            self.cfg.range_days,
+            self.cfg.trend_days + 1,
+            self.cfg.vol_recent_bars + self.cfg.vol_lookback,
+        ) + 2
+
+        btc_trend = self._btc_trend()
 
         def one(sym: str) -> tuple[str, list[_Bar] | None, list[_OiPt] | None]:
             bars = self._fetch_klines(sym, need_klines)
-            oi = self._fetch_oi_hist(sym, self.cfg.oi_days)
+            oi = self._fetch_oi_hist(sym, max(self.cfg.oi_days, 7))
             return sym, bars, oi
 
         with ThreadPoolExecutor(max_workers=self.cfg.max_workers) as pool:
@@ -179,7 +188,7 @@ class FuturesAccumulationWatcher:
                 if not bars or not oi:
                     continue
                 checked += 1
-                ok, meta = self._passes(bars, oi)
+                ok, meta = self._passes(bars, oi, btc_trend)
                 if not ok or not meta:
                     continue
                 hits += 1
@@ -195,19 +204,35 @@ class FuturesAccumulationWatcher:
         if skip_notify:
             self._skip_first_alerts = False
             self._log(
-                f"매집 기동 스캔: checked≈{checked} 후보={hits} "
+                f"알트 신호1 기동 스캔: checked≈{checked} 후보={hits} "
                 f"(첫 스캔 알람 생략, 다음부터 전송)"
             )
             return
-        self._log(f"매집 스캔: checked≈{checked} 후보={hits} alerts={alerted}")
+        self._log(f"알트 신호1 스캔: checked≈{checked} 후보={hits} alerts={alerted}")
+
+    def _btc_trend(self) -> float | None:
+        bars = self._fetch_klines("BTCUSDT", self.cfg.trend_days + 2)
+        if not bars or len(bars) < self.cfg.trend_days + 1:
+            return None
+        base = bars[-(self.cfg.trend_days + 1)].close
+        last = bars[-1].close
+        if base <= 0:
+            return None
+        return (last - base) / base * 100.0
 
     def _passes(
-        self, bars: list[_Bar], oi: list[_OiPt]
+        self,
+        bars: list[_Bar],
+        oi: list[_OiPt],
+        btc_trend: float | None,
     ) -> tuple[bool, dict | None]:
         cfg = self.cfg
-        if len(bars) < max(cfg.range_days, cfg.trend_days + 1):
-            return False, None
-        if len(oi) < cfg.oi_days:
+        need_bars = max(
+            cfg.range_days,
+            cfg.trend_days + 1,
+            cfg.vol_recent_bars + cfg.vol_lookback,
+        )
+        if len(bars) < need_bars or len(oi) < cfg.oi_days:
             return False, None
 
         window = bars[-cfg.range_days :]
@@ -233,37 +258,62 @@ class FuturesAccumulationWatcher:
         if oi0 <= 0 or oi1 < cfg.min_oi_usdt:
             return False, None
         oi_pct = (oi1 - oi0) / oi0 * 100.0
-        if oi_pct < cfg.oi_change_pct:
+
+        prior = bars[-(cfg.vol_recent_bars + cfg.vol_lookback) : -cfg.vol_recent_bars]
+        recent = bars[-cfg.vol_recent_bars :]
+        avg_vol = sum(b.qvol for b in prior) / len(prior) if prior else 0.0
+        rec_vol = sum(b.qvol for b in recent) / len(recent) if recent else 0.0
+        vol_x = rec_vol / avg_vol if avg_vol > 0 else 0.0
+
+        rs_pct = None if btc_trend is None else trend_pct - btc_trend
+
+        tight_ok = range_pct <= cfg.tight_range_pct
+        oi_ok = oi_pct >= cfg.oi_change_pct
+        vol_ok = vol_x >= cfg.vol_mult
+        rs_ok = rs_pct is not None and cfg.btc_rs_pct > 0 and rs_pct >= cfg.btc_rs_pct
+
+        flow_n = int(oi_ok) + int(vol_ok)
+        struct_n = int(tight_ok) + int(rs_ok)
+        if flow_n < 1 or flow_n + struct_n < 2:
             return False, None
 
+        flags = [n for n, ok in (("tight", tight_ok), ("oi", oi_ok), ("vol", vol_ok), ("rs", rs_ok)) if ok]
         return True, {
             "range_pct": range_pct,
             "trend_pct": trend_pct,
             "oi_pct": oi_pct,
             "oi_now": oi1,
+            "vol_x": vol_x,
+            "rs_pct": rs_pct,
+            "flags": flags,
             "close": last.close,
             "ot": last.ot,
         }
 
     def _emit(self, symbol: str, meta: dict) -> None:
         ts = datetime.fromtimestamp(meta["ot"], tz=timezone.utc).strftime("%Y-%m-%d UTC")
+        flags = "+".join(meta.get("flags") or [])
+        rs = meta.get("rs_pct")
+        rs_s = f"{rs:+.1f}%" if isinstance(rs, (int, float)) else "n/a"
         msg = (
-            f"[매집 관심] Binance Futures 1d\n"
+            f"[알트코인 신호 1] OI 변동\n"
             f"{symbol}\n"
-            f"관망/관심 (즉시 진입 금지)\n"
+            f"관망/관심 (즉시 진입 금지)  hit={flags}\n"
             f"range={meta['range_pct']:.1f}% / {self.cfg.range_days}일  "
-            f"(<{self.cfg.range_pct:g}%)\n"
+            f"(gate<{self.cfg.range_pct:g}% tight<{self.cfg.tight_range_pct:g}%)\n"
             f"OI={meta['oi_pct']:+.1f}% / {self.cfg.oi_days}일  "
             f"now={_fmt_vol(meta['oi_now'])} "
             f"(≥{_fmt_vol(self.cfg.min_oi_usdt)}, ≥+{self.cfg.oi_change_pct:g}%)\n"
+            f"vol=x{meta['vol_x']:.2f} (최근{self.cfg.vol_recent_bars}d / "
+            f"직전{self.cfg.vol_lookback}d, ≥{self.cfg.vol_mult:g})\n"
             f"{self.cfg.trend_days}d price={meta['trend_pct']:+.1f}%  "
-            f"({self.cfg.trend_min_pct:g}~{self.cfg.trend_max_pct:g}%)\n"
+            f"vsBTC={rs_s} (≥{self.cfg.btc_rs_pct:g}%)\n"
             f"close={_fmt_price(meta['close'])}  bar={ts}"
         )
         try:
             self.notify(msg)
         except Exception as exc:
-            self._log(f"매집 알람 전송 실패 {symbol}: {exc}")
+            self._log(f"알트 신호1 전송 실패 {symbol}: {exc}")
         self._log(msg.replace("\n", " | "))
 
     def _worker_http(self) -> httpx.Client:
@@ -294,6 +344,7 @@ class FuturesAccumulationWatcher:
                             high=float(r[2]),
                             low=float(r[3]),
                             close=float(r[4]),
+                            qvol=float(r[7]),
                         )
                     )
                 return out
