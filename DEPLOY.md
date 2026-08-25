@@ -46,10 +46,17 @@ git pull
 source .venv/bin/activate
 pip install -r requirements.txt
 sudo systemctl restart stock-monitor
-sudo systemctl status stock-monitor
+sudo systemctl restart stock-monitor-web
+sudo systemctl status stock-monitor --no-pager
+sudo systemctl status stock-monitor-web --no-pager
 ```
 
-`Active: active (running)` 이면 성공.
+둘 다 `Active: active (running)` 이면 성공.
+
+- `stock-monitor` — 알람 모니터
+- `stock-monitor-web` — 설정 페이지 (`:8080`)
+
+웹 템플릿/폼을 바꿨는데 모니터만 재시작하면, 알람은 새 코드인데 설정 페이지는 예전 화면이 그대로입니다. **코드 pull 후에는 둘 다 재시작**하세요.
 
 `status` 맨 아래 `lines ... (END)` 는 **멈춘 게 아니라 페이저**입니다. **`q`** 로 나가세요.
 (페이저 없이 보려면: `sudo systemctl status stock-monitor --no-pager`)
@@ -72,17 +79,19 @@ SSH 접속 후:
 
 ```bash
 sudo systemctl restart stock-monitor
+sudo systemctl restart stock-monitor-web
 sudo systemctl status stock-monitor --no-pager
+sudo systemctl status stock-monitor-web --no-pager
 ```
 
 | 명령 | 의미 |
 |------|------|
-| `sudo systemctl start stock-monitor` | 켜기 |
-| `sudo systemctl stop stock-monitor` | 끄기 |
-| `sudo systemctl restart stock-monitor` | 재시작 |
-| `sudo systemctl status stock-monitor --no-pager` | 상태 (페이저 없음) |
-| `journalctl -u stock-monitor -n 50 --no-pager` | 최근 로그 |
-| `journalctl -u stock-monitor -f` | 실시간 로그 |
+| `sudo systemctl restart stock-monitor` | 모니터 재시작 |
+| `sudo systemctl restart stock-monitor-web` | 설정 웹 재시작 |
+| `sudo systemctl status stock-monitor --no-pager` | 모니터 상태 |
+| `sudo systemctl status stock-monitor-web --no-pager` | 웹 상태 |
+| `journalctl -u stock-monitor -f` | 모니터 실시간 로그 |
+| `journalctl -u stock-monitor-web -f` | 웹 실시간 로그 |
 
 ---
 
@@ -90,15 +99,19 @@ sudo systemctl status stock-monitor --no-pager
 
 | 무엇을 바꿨나 | PC | 서버 |
 |---------------|----|------|
-| 코드 / `config.yaml` | `commit` → `push` | `git pull` → `restart` |
-| `requirements.txt` | `commit` → `push` | `git pull` → **`pip install -r requirements.txt`** → `restart` |
-| `.env` (텔레그램) | push **금지** | 서버에서 `nano .env` → `restart` |
+| 코드 (모니터·웹 포함) | `commit` → `push` | `git pull` → **`stock-monitor` + `stock-monitor-web` 둘 다 restart** |
+| `config.yaml`만 git으로 | `commit` → `push` | `git pull` → `stock-monitor` restart (웹 화면은 그대로여도 됨) |
+| `requirements.txt` | `commit` → `push` | `git pull` → **`pip install -r requirements.txt`** → 둘 다 restart |
+| `.env` (텔레그램/웹비번) | push **금지** | 서버에서 `nano .env` → 해당 서비스 restart |
+| 웹에서 숫자만 저장 | — | pull/재시작 **불필요** (모니터가 수 초 내 파일 재읽기) |
 
 ---
 
 ## D. 설정 웹 (모바일/PC에서 config 수정)
 
-브라우저로 `config.yaml`을 바꿉니다. 모니터가 **약 5초마다** 파일을 다시 읽어 반영하므로 재시작은 필요 없습니다.
+이미 배포된 설정 페이지에서 **값만** 바꾸면, 모니터가 **약 5초마다** `config.yaml`을 다시 읽어 반영합니다. 그때는 재시작이 필요 없습니다.
+
+설정 페이지에 칸이 추가되는 등 **웹 코드를 바꾼 뒤**에는 `git pull` 후 `stock-monitor-web`도 재시작해야 새 화면이 나옵니다.
 
 ### 1) 서버 `.env`에 비밀번호 추가
 
@@ -157,5 +170,5 @@ sudo systemctl status stock-monitor-web --no-pager
 ## E. 한 줄 요약
 
 **PC:** `git add .` → `git commit -m "..."` → `git push`  
-**서버:** `git pull` → (`pip install`) → `sudo systemctl restart stock-monitor`  
-**설정만 바꿀 때:** 웹 `http://서버IP:8080` → 저장 (자동 반영)
+**서버:** `git pull` → (`pip install`) → `sudo systemctl restart stock-monitor stock-monitor-web`  
+**웹에서 숫자만 바꿀 때:** `http://서버IP:8080` → 저장 (pull/재시작 없음)
