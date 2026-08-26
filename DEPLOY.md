@@ -4,22 +4,27 @@ PC에서 코드 수정 → GitHub → EC2 반영 → 서비스 재시작
 
 ## 접속 정보
 
-| 항목 | 값 |
-|------|-----|
-| 로컬 | `C:\stock_monitor` |
-| GitHub | `https://github.com/okm1011/stock_monitor.git` |
-| SSH | `ssh -i C:\stock_monitor_key.pem ec2-user@13.209.65.145` |
-| 서버 경로 | `~/stock_monitor` (`/home/ec2-user/stock_monitor`) |
-| 서비스 | `stock-monitor` |
-| 설정 웹 | `http://13.209.65.145:8080` (`stock-monitor-web`) |
+| 항목 | Windows | Mac |
+|------|---------|-----|
+| 로컬 | `C:\stock_monitor` | `~/Programming/stock_monitor` |
+| SSH 키 | `C:\stock_monitor_key.pem` | `~/Programming/stock_monitor_key.pem` |
+| SSH | `ssh -i C:\stock_monitor_key.pem ec2-user@13.209.65.145` | `ssh -i ~/Programming/stock_monitor_key.pem ec2-user@13.209.65.145` |
+| GitHub | `https://github.com/okm1011/stock_monitor.git` | 같음 |
+| 서버 경로 | `~/stock_monitor` (`/home/ec2-user/stock_monitor`) | 같음 |
+| 서비스 | `stock-monitor` | 같음 |
+| 설정 웹 | `http://13.209.65.145:8080` (`stock-monitor-web`) | 같음 |
 
 > IP가 바뀌면 위 SSH 주소·웹 URL의 IP만 고치세요.
+>
+> Mac에서는 Windows처럼 `.\키.pem` / `C:\...` 를 쓰지 마세요. `\` 는 경로가 아니라 이스케이프라서 키를 못 찾고 `Permission denied (publickey)` 가 납니다. `/` 와 `./키.pem` 을 쓰세요.
 
 ---
 
 ## A. 코드 업데이트 배포 (가장 자주)
 
-### 1) PC (PowerShell)
+### 1) PC에서 커밋 / push
+
+**Windows (PowerShell)**
 
 ```powershell
 cd C:\stock_monitor
@@ -29,13 +34,41 @@ git commit -m "변경 요약 메시지"
 git push
 ```
 
+**Mac (터미널)**
+
+```bash
+cd ~/Programming/stock_monitor
+git status
+git add .
+git commit -m "변경 요약 메시지"
+git push
+```
+
 - `.env` 는 커밋하지 마세요.
 - 커밋할 게 없으면 `git commit` 은 건너뛰고, 이미 push 된 상태인지 `git status` 로 확인만 하면 됩니다.
 
-### 2) 서버 SSH 접속 (PC PowerShell)
+### 2) 서버 SSH 접속
+
+**Windows (PowerShell)**
 
 ```powershell
 ssh -i C:\stock_monitor_key.pem ec2-user@13.209.65.145
+```
+
+**Mac (터미널)**
+
+다른 PC에서 pem을 복사해 온 직후면, 한 번만 권한을 좁히세요. (644면 SSH가 키를 거부할 수 있습니다.)
+
+```bash
+chmod 400 ~/Programming/stock_monitor_key.pem
+ssh -i ~/Programming/stock_monitor_key.pem ec2-user@13.209.65.145
+```
+
+키 파일이 현재 폴더에 있으면:
+
+```bash
+chmod 400 ./stock_monitor_key.pem
+ssh -i ./stock_monitor_key.pem ec2-user@13.209.65.145
 ```
 
 ### 3) 서버에서 pull + 재시작 (SSH 안)
