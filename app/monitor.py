@@ -18,6 +18,7 @@ from app.models import AssetClass, WatchTarget
 from app.settings import get_settings
 from app.storage import CandleStore
 from app.universe import BinanceUniverseService, resolve_watch_targets
+from app.rsi_reclaim import FuturesRsiReclaimWatcher
 from app.volume_spike import FuturesVolumeSpikeWatcher
 
 
@@ -73,6 +74,7 @@ class Monitor:
             BinanceUniverseService(config.universe) if config.universe.enabled else None
         )
         self._volume_spike: FuturesVolumeSpikeWatcher | None = None
+        self._rsi_reclaim: FuturesRsiReclaimWatcher | None = None
         self._accumulation: FuturesAccumulationWatcher | None = None
         self._absorption: FuturesAbsorptionBarWatcher | None = None
 
@@ -110,6 +112,8 @@ class Monitor:
         enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
+        if self.config.rules.rsi_macd_cross.enabled and self.config.rules.rsi_macd_cross.live:
+            enabled.append("rsi_reclaim")
         if self.config.rules.accumulation.enabled:
             enabled.append("alt_oi")
         if self.config.rules.absorption_bar.enabled:
@@ -149,6 +153,19 @@ class Monitor:
             self._volume_spike.start()
         else:
             self._log("펌프 초입 알람: OFF")
+
+        rc = self.config.rules.rsi_macd_cross
+        if rc.enabled and rc.live:
+            self._rsi_reclaim = FuturesRsiReclaimWatcher(
+                cfg=rc,
+                rsi_period=self.config.rsi.period,
+                notify=self.notifier.send,
+                log=self._log,
+                global_poll=self.config.poll_interval_seconds,
+            )
+            self._rsi_reclaim.start()
+        else:
+            self._log("RSI 재돌파 알람: OFF")
 
         acc = self.config.rules.accumulation
         if acc.enabled:
@@ -248,6 +265,7 @@ class Monitor:
             self._universe_svc = BinanceUniverseService(new_cfg.universe)
 
         self._sync_volume_spike(new_cfg)
+        self._sync_rsi_reclaim(new_cfg)
         self._sync_accumulation(new_cfg)
         self._sync_absorption(new_cfg)
 
@@ -272,6 +290,8 @@ class Monitor:
         enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
         if self.config.rules.volume_spike.enabled:
             enabled.append("volume_spike")
+        if self.config.rules.rsi_macd_cross.enabled and self.config.rules.rsi_macd_cross.live:
+            enabled.append("rsi_reclaim")
         if self.config.rules.accumulation.enabled:
             enabled.append("alt_oi")
         if self.config.rules.absorption_bar.enabled:
@@ -298,6 +318,40 @@ class Monitor:
             self._volume_spike.stop()
             self._volume_spike = None
             self._log("펌프 초입 알람: OFF (config)")
+
+    def _sync_rsi_reclaim(self, cfg: AppConfig) -> None:
+        rc = cfg.rules.rsi_macd_cross
+        want = rc.enabled and rc.live
+        if want:
+            if self._rsi_reclaim is None:
+                self._rsi_reclaim = FuturesRsiReclaimWatcher(
+                    cfg=rc,
+                    rsi_period=cfg.rsi.period,
+                    notify=self.notifier.send,
+                    log=self._log,
+                    global_poll=cfg.poll_interval_seconds,
+                )
+                self._rsi_reclaim.start()
+                return
+            need_restart = self._rsi_reclaim.apply_config(
+                rc, rsi_period=cfg.rsi.period, global_poll=cfg.poll_interval_seconds
+            )
+            if need_restart:
+                self._rsi_reclaim.stop()
+                self._rsi_reclaim = FuturesRsiReclaimWatcher(
+                    cfg=rc,
+                    rsi_period=cfg.rsi.period,
+                    notify=self.notifier.send,
+                    log=self._log,
+                    global_poll=cfg.poll_interval_seconds,
+                )
+                self._rsi_reclaim.start()
+                self._log(f"RSI 재돌파 timeframe → {rc.timeframe}, 워처 재시작")
+            return
+        if self._rsi_reclaim is not None:
+            self._rsi_reclaim.stop()
+            self._rsi_reclaim = None
+            self._log("RSI 재돌파 알람: OFF (config)")
 
     def _sync_accumulation(self, cfg: AppConfig) -> None:
         acc = cfg.rules.accumulation
@@ -447,6 +501,9 @@ class Monitor:
         if self._volume_spike:
             self._volume_spike.stop()
             self._volume_spike = None
+        if self._rsi_reclaim:
+            self._rsi_reclaim.stop()
+            self._rsi_reclaim = None
         if self._accumulation:
             self._accumulation.stop()
             self._accumulation = None

@@ -64,9 +64,31 @@ class ExtremeRsiRuleConfig(BaseModel):
 
 
 class RsiMacdCrossRuleConfig(BaseModel):
-    enabled: bool = False
+    """
+    알람2: 15m RSI가 oversold 이하로 내려갔다가 다시 위로 올라오는 순간.
+    형성 중 봉 포함, USDT-M 무기한 전 종목, poll_seconds마다 갱신.
+    live=true 이면 아래 워처가 담당하고, 기존 MACD 크로스 규칙은 끄지 않아도 평가하지 않음.
+    """
+
+    enabled: bool = True
+    timeframe: Timeframe = "15m"
     oversold: float = 30.0
     overbought: float = 70.0
+    live: bool = True
+    # True면 공통 poll_interval_seconds 사용
+    follow_global_poll: bool = True
+    poll_seconds: float = 60.0
+    cooldown_seconds: int = 900
+    max_workers: int = 12
+    history_bars: int = 50
+    symbol_refresh_hours: float = 24.0
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 15:
+            raise ValueError("rsi_macd_cross.poll_seconds must be >= 15")
+        return v
 
 
 class DivergenceRuleConfig(BaseModel):

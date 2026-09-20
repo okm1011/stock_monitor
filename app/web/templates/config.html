@@ -82,11 +82,12 @@
     </div>
     <div class="check">
       <input type="checkbox" id="extreme_rsi_live" name="extreme_rsi_live" {% if cfg.rules.extreme_rsi.live %}checked{% endif %} />
-      <label for="extreme_rsi_live">RSI 라이브(형성 중 봉)</label>
+      <label for="extreme_rsi_live">1번 라이브 (공통 타임프레임 형성 중 봉으로 극단 진입)</label>
     </div>
+    <p class="sub">위 라이브는 1번(과매수/과매도 진입) 전용입니다. 15분봉 RSI 30 재돌파는 아래 2번입니다.</p>
     <div class="check">
       <input type="checkbox" id="rsi_macd_enabled" name="rsi_macd_enabled" {% if cfg.rules.rsi_macd_cross.enabled %}checked{% endif %} />
-      <label for="rsi_macd_enabled">2 RSI+MACD</label>
+      <label for="rsi_macd_enabled">2 RSI 하강 후 재돌파 (전종목)</label>
     </div>
     <div class="check">
       <input type="checkbox" id="divergence_enabled" name="divergence_enabled" {% if cfg.rules.divergence.enabled %}checked{% endif %} />
@@ -108,6 +109,40 @@
       <input type="checkbox" id="absorption_bar_enabled" name="absorption_bar_enabled" {% if cfg.rules.absorption_bar.enabled %}checked{% endif %} />
       <label for="absorption_bar_enabled">알트코인 신호 2 · 매집봉</label>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>2번 RSI 하강 후 재돌파</h2>
+    <p class="sub">USDT-M 전 종목. 선택한 봉의 RSI가 기준 이하로 내려갔다가 다시 위로 올라오는 순간 알람. 봉 마감 대기 없음.</p>
+    <div class="row">
+      <div>
+        <label>대상봉</label>
+        <select name="rsi_reclaim_timeframe">
+          {% for tf in timeframes %}
+          <option value="{{ tf }}" {% if cfg.rules.rsi_macd_cross.timeframe == tf %}selected{% endif %}>{{ tf }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>RSI 하강 후 돌파 기준</label>
+        <input type="number" step="any" name="rsi_macd_oversold" value="{{ cfg.rules.rsi_macd_cross.oversold }}" required />
+      </div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="rsi_reclaim_follow_poll" name="rsi_reclaim_follow_poll" {% if cfg.rules.rsi_macd_cross.follow_global_poll %}checked{% endif %} />
+      <label for="rsi_reclaim_follow_poll">가격 업데이트 = 공통 폴링 간격 (지금 {{ cfg.poll_interval_seconds }}초)</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>직접 지정 간격(초)</label>
+        <input type="number" step="any" name="rsi_reclaim_poll" value="{{ cfg.rules.rsi_macd_cross.poll_seconds }}" required />
+      </div>
+      <div>
+        <label>종목당 쿨다운(초)</label>
+        <input type="number" name="rsi_reclaim_cooldown" value="{{ cfg.rules.rsi_macd_cross.cooldown_seconds }}" required />
+      </div>
+    </div>
+    <p class="sub">공통 폴링을 체크하면 위의 직접 지정은 무시됩니다. 체크를 끄면 이 규칙만 다른 주기로 시세를 받습니다.</p>
   </div>
 
   <div class="card">

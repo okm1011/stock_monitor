@@ -10,7 +10,11 @@ class RsiMacdCrossRule(AlertRule):
     name = "RSI탈출+MACD크로스"
 
     def enabled(self, config) -> bool:
-        return bool(config.rules.rsi_macd_cross.enabled)
+        cfg = config.rules.rsi_macd_cross
+        # live 15m 재돌파는 전종목 워처가 담당
+        if getattr(cfg, "live", True):
+            return False
+        return bool(cfg.enabled)
 
     def evaluate(self, ctx: IndicatorContext, config) -> list[AlertSignal]:
         i = ctx.i

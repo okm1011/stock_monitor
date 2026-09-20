@@ -108,6 +108,11 @@ def create_app() -> FastAPI:
         extreme_rsi_low: float = Form(...),
         extreme_rsi_live: str | None = Form(None),
         rsi_macd_enabled: str | None = Form(None),
+        rsi_reclaim_timeframe: str = Form(...),
+        rsi_macd_oversold: float = Form(...),
+        rsi_reclaim_follow_poll: str | None = Form(None),
+        rsi_reclaim_poll: float = Form(...),
+        rsi_reclaim_cooldown: int = Form(...),
         divergence_enabled: str | None = Form(None),
         bb_squeeze_enabled: str | None = Form(None),
         volume_spike_enabled: str | None = Form(None),
@@ -162,6 +167,12 @@ def create_app() -> FastAPI:
             data["rules"]["extreme_rsi"]["low"] = float(extreme_rsi_low)
             data["rules"]["extreme_rsi"]["live"] = extreme_rsi_live == "on"
             data["rules"]["rsi_macd_cross"]["enabled"] = rsi_macd_enabled == "on"
+            data["rules"]["rsi_macd_cross"]["live"] = True
+            data["rules"]["rsi_macd_cross"]["timeframe"] = rsi_reclaim_timeframe.strip()
+            data["rules"]["rsi_macd_cross"]["oversold"] = float(rsi_macd_oversold)
+            data["rules"]["rsi_macd_cross"]["follow_global_poll"] = rsi_reclaim_follow_poll == "on"
+            data["rules"]["rsi_macd_cross"]["poll_seconds"] = float(rsi_reclaim_poll)
+            data["rules"]["rsi_macd_cross"]["cooldown_seconds"] = int(rsi_reclaim_cooldown)
             data["rules"]["divergence"]["enabled"] = divergence_enabled == "on"
             data["rules"]["bb_squeeze"]["enabled"] = bb_squeeze_enabled == "on"
             data["rules"]["volume_spike"]["enabled"] = volume_spike_enabled == "on"
