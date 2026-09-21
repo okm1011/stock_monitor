@@ -9,7 +9,10 @@ def calc_rsi(closes: list[float], period: int = 14) -> float | None:
 
 
 def calc_rsi_series(closes: list[float], period: int = 14) -> list[float | None]:
-    """RSI with EMA smoothing (k=2/(period+1)), not Wilder/RMA."""
+    """
+    Wilder RSI (RMA). Binance/TradingView 기본 RSI와 동일.
+    (과거 EMA(k=2/(n+1)) 방식은 차트와 수치가 어긋남)
+    """
     n = len(closes)
     out: list[float | None] = [None] * n
     if period < 2 or n < period + 1:
@@ -23,18 +26,17 @@ def calc_rsi_series(closes: list[float], period: int = 14) -> list[float | None]
             gains += diff
         else:
             losses -= diff
-    # seed: SMA of first `period` changes, then EMA
+    # seed: SMA of first `period` changes, then Wilder smooth
     avg_gain = gains / period
     avg_loss = losses / period
     out[period] = _rsi_from_avg(avg_gain, avg_loss)
 
-    k = 2.0 / (period + 1)
     for i in range(period + 1, n):
         diff = closes[i] - closes[i - 1]
         gain = diff if diff > 0 else 0.0
         loss = -diff if diff < 0 else 0.0
-        avg_gain = gain * k + avg_gain * (1.0 - k)
-        avg_loss = loss * k + avg_loss * (1.0 - k)
+        avg_gain = ((avg_gain * (period - 1)) + gain) / period
+        avg_loss = ((avg_loss * (period - 1)) + loss) / period
         out[i] = _rsi_from_avg(avg_gain, avg_loss)
     return out
 

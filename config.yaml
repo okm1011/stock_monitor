@@ -61,7 +61,7 @@ atr:
 
 # 알람 규칙 on/off: enabled true/false
 # 1) extreme_rsi     — RSI 과매수/과매도
-# 2) rsi_macd_cross  — 15m RSI 30 이하 → 재상향 (전종목·형성중봉·1분)
+# 2) rsi_macd_cross  — RSI 하강(oversold) 후 재돌파(reclaim) (전종목·형성중봉)
 # 3) divergence      — 상/하강 다이버전스
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
 # 5) volume_spike    — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
@@ -73,11 +73,12 @@ rules:
     high: 83.0
     low: 23.0
     live: true            # 형성 중 4h봉에서도 RSI 돌파 즉시 알람
-    rsi_macd_cross:
+  rsi_macd_cross:
     enabled: true
     live: true
     timeframe: 15m          # 대상봉
-    oversold: 30.0          # 이 값 이하로 갔다가 다시 위로 올라오는 순간
+    oversold: 30.0          # 이 값 이하로 내려가야 무장
+    reclaim: 30.0           # 무장 후 이 값 이상 상향 돌파 시 알람 (예: 35면 더 확실히 돌파)
     overbought: 70.0
     follow_global_poll: true  # 가격 갱신 = 공통 폴링 간격
     poll_seconds: 60          # follow_global_poll=false 일 때만

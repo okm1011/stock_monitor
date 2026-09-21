@@ -113,7 +113,7 @@
 
   <div class="card">
     <h2>2번 RSI 하강 후 재돌파</h2>
-    <p class="sub">USDT-M 전 종목. 선택한 봉의 RSI가 기준 이하로 내려갔다가 다시 위로 올라오는 순간 알람. 봉 마감 대기 없음.</p>
+    <p class="sub">USDT-M 전 종목. 선택한 봉의 RSI가 하강 기준 이하로 내려갔다가, 재돌파 기준 이상으로 올라오는 순간 알람. 봉 마감 대기 없음.</p>
     <div class="row">
       <div>
         <label>대상봉</label>
@@ -124,10 +124,21 @@
         </select>
       </div>
       <div>
-        <label>RSI 하강 후 돌파 기준</label>
+        <label>하강 기준 (이 값 이하로 내려가야 함)</label>
         <input type="number" step="any" name="rsi_macd_oversold" value="{{ cfg.rules.rsi_macd_cross.oversold }}" required />
       </div>
     </div>
+    <div class="row">
+      <div>
+        <label>재돌파 기준 (이 값 이상 올라올 때 알람)</label>
+        <input type="number" step="any" name="rsi_reclaim_level" value="{{ cfg.rules.rsi_macd_cross.reclaim }}" required />
+      </div>
+      <div>
+        <label>종목당 쿨다운(초)</label>
+        <input type="number" name="rsi_reclaim_cooldown" value="{{ cfg.rules.rsi_macd_cross.cooldown_seconds }}" required />
+      </div>
+    </div>
+    <p class="sub">예: 하강 30 / 재돌파 35 → 30 이하로 찍은 뒤 35를 상향 돌파할 때 알람. 둘이 같으면 살짝만 넘어도 울립니다.</p>
     <div class="check">
       <input type="checkbox" id="rsi_reclaim_follow_poll" name="rsi_reclaim_follow_poll" {% if cfg.rules.rsi_macd_cross.follow_global_poll %}checked{% endif %} />
       <label for="rsi_reclaim_follow_poll">가격 업데이트 = 공통 폴링 간격 (지금 {{ cfg.poll_interval_seconds }}초)</label>
@@ -137,10 +148,7 @@
         <label>직접 지정 간격(초)</label>
         <input type="number" step="any" name="rsi_reclaim_poll" value="{{ cfg.rules.rsi_macd_cross.poll_seconds }}" required />
       </div>
-      <div>
-        <label>종목당 쿨다운(초)</label>
-        <input type="number" name="rsi_reclaim_cooldown" value="{{ cfg.rules.rsi_macd_cross.cooldown_seconds }}" required />
-      </div>
+      <div></div>
     </div>
     <p class="sub">공통 폴링을 체크하면 위의 직접 지정은 무시됩니다. 체크를 끄면 이 규칙만 다른 주기로 시세를 받습니다.</p>
   </div>

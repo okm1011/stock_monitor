@@ -26,13 +26,14 @@ class _SymState:
     forming_ot: int | None = None
     forming_close: float | None = None
     last_rsi: float | None = None
+    armed: bool = False  # oversold 이하로 내려간 적 있음
     last_alert_mono: float = 0.0
 
 
 class FuturesRsiReclaimWatcher:
     """
-    15m(설정) RSI가 과매도 이하 → 다시 위로 올라오는 순간 즉시 알람.
-    봉 마감을 기다리지 않고, 형성 중 봉 종가(현재가)로 1분마다 재계산.
+    설정봉 RSI가 oversold 이하 → reclaim 이상으로 올라오는 순간 즉시 알람.
+    봉 마감을 기다리지 않고, 형성 중 봉 종가(현재가)로 주기적으로 재계산.
     """
 
     BASE = "https://fapi.binance.com"
@@ -108,7 +109,7 @@ class FuturesRsiReclaimWatcher:
         poll = self._poll_seconds()
         self._log(
             f"RSI 재돌파 감시 시작 futures {self.cfg.timeframe} (형성중봉) | "
-            f"RSI≤{self.cfg.oversold:g} → 재상향 | "
+            f"RSI≤{self.cfg.oversold:g} → ≥{self.cfg.reclaim:g} | "
             f"poll={poll:g}s"
             f"{' (공통)' if self.cfg.follow_global_poll else ''} "
             f"cooldown={self.cfg.cooldown_seconds}s"
@@ -186,6 +187,7 @@ class FuturesRsiReclaimWatcher:
                 st.forming_ot, st.forming_close = forming
                 rsi = calc_rsi(list(st.closes) + [forming[1]], self.rsi_period)
                 st.last_rsi = rsi
+                st.armed = bool(rsi is not None and rsi <= self.cfg.oversold)
                 hits += 1
                 if done % 100 == 0:
                     self._log(f"  RSI 백필 {done}/{len(self._symbols)}")
@@ -226,14 +228,20 @@ class FuturesRsiReclaimWatcher:
             checked += 1
             prev = st.last_rsi
             st.last_rsi = rsi
+            if rsi <= self.cfg.oversold:
+                st.armed = True
             if prev is None:
                 continue
-            if not (prev <= self.cfg.oversold < rsi):
+            if not st.armed:
+                continue
+            # oversold 이하로 내려간 뒤, reclaim 레벨을 상향 돌파할 때
+            if not (prev < self.cfg.reclaim <= rsi):
                 continue
             if now_m - st.last_alert_mono < self.cfg.cooldown_seconds:
                 continue
             self._emit(sym, px, rsi, prev)
             st.last_alert_mono = now_m
+            st.armed = False
             alerts += 1
         self._log(f"RSI 재돌파 스캔: checked≈{checked} alerts={alerts}")
 
@@ -242,7 +250,8 @@ class FuturesRsiReclaimWatcher:
         msg = (
             f"[RSI 재돌파] Binance Futures {self.cfg.timeframe} (형성중)\n"
             f"{symbol}\n"
-            f"RSI {prev:.2f} → {rsi:.2f}  (≤{self.cfg.oversold:g} 후 상향)\n"
+            f"RSI {prev:.2f} → {rsi:.2f}  "
+            f"(≤{self.cfg.oversold:g} 후 ≥{self.cfg.reclaim:g})\n"
             f"price={_fmt_price(price)}  {ts}"
         )
         try:

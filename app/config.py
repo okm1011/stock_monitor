@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 Timeframe = Literal["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"]
@@ -65,7 +65,7 @@ class ExtremeRsiRuleConfig(BaseModel):
 
 class RsiMacdCrossRuleConfig(BaseModel):
     """
-    알람2: 15m RSI가 oversold 이하로 내려갔다가 다시 위로 올라오는 순간.
+    알람2: 15m RSI가 oversold 이하로 내려갔다가 reclaim 이상으로 올라오는 순간.
     형성 중 봉 포함, USDT-M 무기한 전 종목, poll_seconds마다 갱신.
     live=true 이면 아래 워처가 담당하고, 기존 MACD 크로스 규칙은 끄지 않아도 평가하지 않음.
     """
@@ -73,6 +73,8 @@ class RsiMacdCrossRuleConfig(BaseModel):
     enabled: bool = True
     timeframe: Timeframe = "15m"
     oversold: float = 30.0
+    # 하강(oversold 이하) 후 이 값 이상으로 올라올 때 알람. oversold와 같으면 '살짝만 넘어도' 울림.
+    reclaim: float = 30.0
     overbought: float = 70.0
     live: bool = True
     # True면 공통 poll_interval_seconds 사용
@@ -89,6 +91,12 @@ class RsiMacdCrossRuleConfig(BaseModel):
         if v < 15:
             raise ValueError("rsi_macd_cross.poll_seconds must be >= 15")
         return v
+
+    @model_validator(mode="after")
+    def _reclaim_ok(self) -> RsiMacdCrossRuleConfig:
+        if self.reclaim < self.oversold:
+            raise ValueError("rsi_macd_cross.reclaim must be >= oversold")
+        return self
 
 
 class DivergenceRuleConfig(BaseModel):
@@ -375,6 +383,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     if isinstance(data.get("rsi"), dict):
         legacy = data["rsi"]
         data["rsi"] = {"period": legacy.get("period", 7)}
+    # reclaim 미설정 시 oversold와 동일 (기존 동작)
+    rules = data.get("rules")
+    if isinstance(rules, dict):
+        rmc = rules.get("rsi_macd_cross")
+        if isinstance(rmc, dict) and "reclaim" not in rmc:
+            rmc["reclaim"] = float(rmc.get("oversold", 30.0))
     return AppConfig.model_validate(data)
 
 

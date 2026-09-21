@@ -110,6 +110,7 @@ def create_app() -> FastAPI:
         rsi_macd_enabled: str | None = Form(None),
         rsi_reclaim_timeframe: str = Form(...),
         rsi_macd_oversold: float = Form(...),
+        rsi_reclaim_level: float = Form(...),
         rsi_reclaim_follow_poll: str | None = Form(None),
         rsi_reclaim_poll: float = Form(...),
         rsi_reclaim_cooldown: int = Form(...),
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
             data["rules"]["rsi_macd_cross"]["live"] = True
             data["rules"]["rsi_macd_cross"]["timeframe"] = rsi_reclaim_timeframe.strip()
             data["rules"]["rsi_macd_cross"]["oversold"] = float(rsi_macd_oversold)
+            data["rules"]["rsi_macd_cross"]["reclaim"] = float(rsi_reclaim_level)
             data["rules"]["rsi_macd_cross"]["follow_global_poll"] = rsi_reclaim_follow_poll == "on"
             data["rules"]["rsi_macd_cross"]["poll_seconds"] = float(rsi_reclaim_poll)
             data["rules"]["rsi_macd_cross"]["cooldown_seconds"] = int(rsi_reclaim_cooldown)
