@@ -48,6 +48,23 @@ def _rsi_from_avg(avg_gain: float, avg_loss: float) -> float:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
+def calc_sma(closes: list[float], period: int) -> float | None:
+    if period < 1 or len(closes) < period:
+        return None
+    window = closes[-period:]
+    return sum(window) / period
+
+
+def calc_sma_series(closes: list[float], period: int) -> list[float | None]:
+    n = len(closes)
+    out: list[float | None] = [None] * n
+    if period < 1 or n < period:
+        return out
+    for i in range(period - 1, n):
+        out[i] = sum(closes[i - period + 1 : i + 1]) / period
+    return out
+
+
 def _ema_series(values: list[float], period: int) -> list[float | None]:
     n = len(values)
     out: list[float | None] = [None] * n

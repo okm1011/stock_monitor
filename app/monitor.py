@@ -14,11 +14,12 @@ from app.aggregator import CandleAggregator
 from app.alerts import Notifier, RuleEngine, build_notifier
 from app.config import AppConfig, default_config_path, load_config, resolve_db_path
 from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller
+from app.ma20_approach import FuturesMa20ApproachWatcher
 from app.models import AssetClass, WatchTarget
+from app.rsi_reclaim import FuturesRsiReclaimWatcher
 from app.settings import get_settings
 from app.storage import CandleStore
 from app.universe import BinanceUniverseService, resolve_watch_targets
-from app.rsi_reclaim import FuturesRsiReclaimWatcher
 from app.volume_spike import FuturesVolumeSpikeWatcher
 
 
@@ -77,6 +78,7 @@ class Monitor:
         self._rsi_reclaim: FuturesRsiReclaimWatcher | None = None
         self._accumulation: FuturesAccumulationWatcher | None = None
         self._absorption: FuturesAbsorptionBarWatcher | None = None
+        self._ma20_approach: FuturesMa20ApproachWatcher | None = None
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
@@ -118,6 +120,8 @@ class Monitor:
             enabled.append("alt_oi")
         if self.config.rules.absorption_bar.enabled:
             enabled.append("alt_absorption")
+        if self.config.rules.ma20_approach.enabled:
+            enabled.append("ma20_approach")
         self._log(
             f"모니터 시작 poll={self.config.poll_interval_seconds}s "
             f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
@@ -188,6 +192,17 @@ class Monitor:
             self._absorption.start()
         else:
             self._log("알트 신호2 매집봉: OFF")
+
+        ma = self.config.rules.ma20_approach
+        if ma.enabled and ma.enabled_timeframes():
+            self._ma20_approach = FuturesMa20ApproachWatcher(
+                cfg=ma,
+                notify=self.notifier.send,
+                log=self._log,
+            )
+            self._ma20_approach.start()
+        else:
+            self._log("MA20 근접 알람: OFF")
 
         while not self._stop:
             loop_started = time.monotonic()
@@ -268,6 +283,7 @@ class Monitor:
         self._sync_rsi_reclaim(new_cfg)
         self._sync_accumulation(new_cfg)
         self._sync_absorption(new_cfg)
+        self._sync_ma20_approach(new_cfg)
 
         if tf_changed:
             self._log(f"timeframe 변경 {old.timeframe} → {new_cfg.timeframe}, 봉 재집계")
@@ -296,6 +312,8 @@ class Monitor:
             enabled.append("alt_oi")
         if self.config.rules.absorption_bar.enabled:
             enabled.append("alt_absorption")
+        if self.config.rules.ma20_approach.enabled:
+            enabled.append("ma20_approach")
         self._log(
             f"config 반영 poll={new_cfg.poll_interval_seconds}s tf={new_cfg.timeframe} "
             f"규칙={', '.join(enabled) if enabled else '(없음)'}"
@@ -388,6 +406,25 @@ class Monitor:
             self._absorption.stop()
             self._absorption = None
             self._log("알트 신호2 매집봉: OFF (config)")
+
+    def _sync_ma20_approach(self, cfg: AppConfig) -> None:
+        ma = cfg.rules.ma20_approach
+        want = ma.enabled and bool(ma.enabled_timeframes())
+        if want:
+            if self._ma20_approach is None:
+                self._ma20_approach = FuturesMa20ApproachWatcher(
+                    cfg=ma,
+                    notify=self.notifier.send,
+                    log=self._log,
+                )
+                self._ma20_approach.start()
+                return
+            self._ma20_approach.apply_config(ma)
+            return
+        if self._ma20_approach is not None:
+            self._ma20_approach.stop()
+            self._ma20_approach = None
+            self._log("MA20 근접 알람: OFF (config)")
 
     def _maybe_refresh_universe(self) -> None:
         if not self._universe_svc or not self._universe_svc.needs_refresh():
@@ -510,6 +547,9 @@ class Monitor:
         if self._absorption:
             self._absorption.stop()
             self._absorption = None
+        if self._ma20_approach:
+            self._ma20_approach.stop()
+            self._ma20_approach = None
         self.price_fetcher.close()
         self.backfiller.close()
         if self._universe_svc:

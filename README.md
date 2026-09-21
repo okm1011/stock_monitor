@@ -8,6 +8,7 @@ Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면
 # 알람 규칙 on/off (`config.yaml` rules.*.enabled)
 # - extreme_rsi: RSI 과매수/과매도
 # - rsi_macd_cross: RSI 하강(oversold) 후 재돌파(reclaim) (전종목, 형성중봉)
+# - ma20_approach: SMA20 위에서 아래로 근접 (1h/4h/1d 개별 on/off)
 # - divergence: 상/하강 다이버전스
 # - bb_squeeze: 볼린저 스퀴즈
 # - volume_spike: 잡코인 펌프 초입 (가격% ∧ 거래량 ∧ 횡보 ∧ 메이저제외)

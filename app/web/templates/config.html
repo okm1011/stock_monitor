@@ -109,6 +109,10 @@
       <input type="checkbox" id="absorption_bar_enabled" name="absorption_bar_enabled" {% if cfg.rules.absorption_bar.enabled %}checked{% endif %} />
       <label for="absorption_bar_enabled">알트코인 신호 2 · 매집봉</label>
     </div>
+    <div class="check">
+      <input type="checkbox" id="ma20_approach_enabled" name="ma20_approach_enabled" {% if cfg.rules.ma20_approach.enabled %}checked{% endif %} />
+      <label for="ma20_approach_enabled">MA20 위에서 아래로 근접</label>
+    </div>
   </div>
 
   <div class="card">
@@ -310,6 +314,55 @@
       <div>
         <label>쿨다운(초)</label>
         <input type="number" name="ab_cooldown_seconds" value="{{ cfg.rules.absorption_bar.cooldown_seconds }}" required />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>MA20 위에서 아래로 근접</h2>
+    <p class="sub">USDT-M 전 종목. 가격이 SMA20 위에 있다가 이격이 근접% 이내로 좁혀질 때 알람 (아래에서 올라오는 경우는 제외). 1h/4h/1d 각각 켜고 끌 수 있습니다.</p>
+    <p class="sub">권장 근접%: 1h 0.5 · 4h 1.0 · 1d 1.5. 너무 작으면(0.2) 노이즈, 너무 크면(3+) 지지 확인이 늦습니다.</p>
+    <div class="check">
+      <input type="checkbox" id="ma20_tf_1h" name="ma20_tf_1h" {% if cfg.rules.ma20_approach.tf_1h.enabled %}checked{% endif %} />
+      <label for="ma20_tf_1h">1시간 봉</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>1h 근접 % (이격 ≤ 이 값)</label>
+        <input type="number" step="any" name="ma20_prox_1h" value="{{ cfg.rules.ma20_approach.tf_1h.proximity_pct }}" required />
+      </div>
+      <div></div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="ma20_tf_4h" name="ma20_tf_4h" {% if cfg.rules.ma20_approach.tf_4h.enabled %}checked{% endif %} />
+      <label for="ma20_tf_4h">4시간 봉</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>4h 근접 % (이격 ≤ 이 값)</label>
+        <input type="number" step="any" name="ma20_prox_4h" value="{{ cfg.rules.ma20_approach.tf_4h.proximity_pct }}" required />
+      </div>
+      <div></div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="ma20_tf_1d" name="ma20_tf_1d" {% if cfg.rules.ma20_approach.tf_1d.enabled %}checked{% endif %} />
+      <label for="ma20_tf_1d">1일 봉</label>
+    </div>
+    <div class="row">
+      <div>
+        <label>1d 근접 % (이격 ≤ 이 값)</label>
+        <input type="number" step="any" name="ma20_prox_1d" value="{{ cfg.rules.ma20_approach.tf_1d.proximity_pct }}" required />
+      </div>
+      <div></div>
+    </div>
+    <div class="row">
+      <div>
+        <label>폴링(초)</label>
+        <input type="number" step="any" name="ma20_poll_seconds" value="{{ cfg.rules.ma20_approach.poll_seconds }}" required />
+      </div>
+      <div>
+        <label>종목×봉 쿨다운(초)</label>
+        <input type="number" name="ma20_cooldown_seconds" value="{{ cfg.rules.ma20_approach.cooldown_seconds }}" required />
       </div>
     </div>
   </div>

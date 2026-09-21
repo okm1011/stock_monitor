@@ -309,6 +309,61 @@ class AbsorptionBarRuleConfig(BaseModel):
         return v
 
 
+class Ma20TfConfig(BaseModel):
+    """타임프레임별 MA20 상단 근접 설정."""
+
+    enabled: bool = True
+    # 가격이 MA20 위에서 (price-MA)/MA*100 이 이 값 이하로 들어올 때
+    proximity_pct: float = 1.0
+
+    @field_validator("proximity_pct")
+    @classmethod
+    def _prox_ok(cls, v: float) -> float:
+        if not (0.05 <= v <= 20.0):
+            raise ValueError("proximity_pct must be 0.05..20")
+        return v
+
+
+class Ma20ApproachRuleConfig(BaseModel):
+    """
+    MA20 위에서 아래로 근접:
+    가격이 SMA20 위에 있다가, 이격이 proximity_pct% 이내로 좁혀질 때 알람.
+    1h / 4h / 1d 각각 on/off + 근접% 개별 설정.
+    USDT-M 무기한 전 종목, 형성 중 봉 포함.
+    """
+
+    enabled: bool = True
+    period: int = 20
+    tf_1h: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=0.5))
+    tf_4h: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=1.0))
+    tf_1d: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=1.5))
+    poll_seconds: float = 60.0
+    cooldown_seconds: int = 14400  # 종목×타임프레임당 4시간
+    max_workers: int = 10
+    symbol_refresh_hours: float = 24.0
+
+    @field_validator("period")
+    @classmethod
+    def _period_ok(cls, v: int) -> int:
+        if v < 5:
+            raise ValueError("ma20_approach.period must be >= 5")
+        return v
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 30:
+            raise ValueError("ma20_approach.poll_seconds must be >= 30")
+        return v
+
+    def enabled_timeframes(self) -> list[tuple[str, Ma20TfConfig]]:
+        out: list[tuple[str, Ma20TfConfig]] = []
+        for tf, cfg in (("1h", self.tf_1h), ("4h", self.tf_4h), ("1d", self.tf_1d)):
+            if cfg.enabled:
+                out.append((tf, cfg))
+        return out
+
+
 class RulesConfig(BaseModel):
     extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
     rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
@@ -317,6 +372,7 @@ class RulesConfig(BaseModel):
     volume_spike: VolumeSpikeRuleConfig = Field(default_factory=VolumeSpikeRuleConfig)
     accumulation: AccumulationRuleConfig = Field(default_factory=AccumulationRuleConfig)
     absorption_bar: AbsorptionBarRuleConfig = Field(default_factory=AbsorptionBarRuleConfig)
+    ma20_approach: Ma20ApproachRuleConfig = Field(default_factory=Ma20ApproachRuleConfig)
 
 
 class HistoryConfig(BaseModel):

@@ -148,6 +148,15 @@ def create_app() -> FastAPI:
         ab_volume_lookback: int = Form(...),
         ab_poll_seconds: float = Form(...),
         ab_cooldown_seconds: int = Form(...),
+        ma20_approach_enabled: str | None = Form(None),
+        ma20_tf_1h: str | None = Form(None),
+        ma20_prox_1h: float = Form(...),
+        ma20_tf_4h: str | None = Form(None),
+        ma20_prox_4h: float = Form(...),
+        ma20_tf_1d: str | None = Form(None),
+        ma20_prox_1d: float = Form(...),
+        ma20_poll_seconds: float = Form(...),
+        ma20_cooldown_seconds: int = Form(...),
         universe_top_percentile: float = Form(...),
         universe_max_symbols: int = Form(...),
         include_static_stocks: str | None = Form(None),
@@ -209,6 +218,16 @@ def create_app() -> FastAPI:
             data["rules"]["absorption_bar"]["volume_lookback"] = int(ab_volume_lookback)
             data["rules"]["absorption_bar"]["poll_seconds"] = float(ab_poll_seconds)
             data["rules"]["absorption_bar"]["cooldown_seconds"] = int(ab_cooldown_seconds)
+            ma20 = data["rules"].setdefault("ma20_approach", {})
+            ma20["enabled"] = ma20_approach_enabled == "on"
+            ma20.setdefault("tf_1h", {})["enabled"] = ma20_tf_1h == "on"
+            ma20.setdefault("tf_1h", {})["proximity_pct"] = float(ma20_prox_1h)
+            ma20.setdefault("tf_4h", {})["enabled"] = ma20_tf_4h == "on"
+            ma20.setdefault("tf_4h", {})["proximity_pct"] = float(ma20_prox_4h)
+            ma20.setdefault("tf_1d", {})["enabled"] = ma20_tf_1d == "on"
+            ma20.setdefault("tf_1d", {})["proximity_pct"] = float(ma20_prox_1d)
+            ma20["poll_seconds"] = float(ma20_poll_seconds)
+            ma20["cooldown_seconds"] = int(ma20_cooldown_seconds)
             data["universe"]["top_percentile"] = float(universe_top_percentile)
             data["universe"]["max_symbols"] = int(universe_max_symbols)
             data["universe"]["include_static_stocks"] = include_static_stocks == "on"

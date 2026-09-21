@@ -66,7 +66,7 @@ atr:
 # 4) bb_squeeze      — 볼린저 스퀴즈 밴드
 # 5) volume_spike    — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
 # 6) accumulation    — 알트코인 신호 1 OI 변동
-# 7) absorption_bar  — 알트코인 신호 2 매집봉 (윗꼬리+거래량, 종가는 안 움직임)
+# 8) ma20_approach   — MA20 위에서 아래로 근접 (1h/4h/1d 개별)
 rules:
   extreme_rsi:
     enabled: true
@@ -170,6 +170,24 @@ rules:
     volume_mult: 3.5
     poll_seconds: 60
     cooldown_seconds: 28800 # 종목당 8시간
+    max_workers: 10
+    symbol_refresh_hours: 24
+  ma20_approach:
+    enabled: true
+    period: 20
+    # 이격% = (가격-MA)/MA*100. MA 위에서 이 값 이내로 좁혀질 때 알람
+    # 권장: 1h 0.5 / 4h 1.0 / 1d 1.5 (너무 작으면 노이즈, 크면 늦은 신호)
+    tf_1h:
+      enabled: true
+      proximity_pct: 0.5
+    tf_4h:
+      enabled: true
+      proximity_pct: 1.0
+    tf_1d:
+      enabled: true
+      proximity_pct: 1.5
+    poll_seconds: 60
+    cooldown_seconds: 14400  # 종목×타임프레임당 4시간
     max_workers: 10
     symbol_refresh_hours: 24
 
