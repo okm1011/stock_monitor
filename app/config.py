@@ -1,455 +1,272 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-Timeframe = Literal["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"]
+DEFAULT_EXCLUDE_BASES = [
+    "USDC",
+    "FDUSD",
+    "TUSD",
+    "BUSD",
+    "USDP",
+    "DAI",
+    "USDE",
+    "USD1",
+    "PYUSD",
+    "BFUSD",
+    "XUSD",
+]
 
 
-class CryptoSymbol(BaseModel):
-    id: str
-    symbol: str
-    name: str
-    binance_symbol: str | None = None
+class UniverseConfig(BaseModel):
+    """바이낸스 USDⓈ-M 선물 24시간 거래대금 상위 N개 (코인 + 주식/원자재 토큰)."""
 
-    def market_symbol(self) -> str:
-        return self.binance_symbol or f"{self.symbol.upper()}USDT"
+    enabled: bool = True
+    top_n: int = 100
+    # False면 코인(PERPETUAL)만, True면 주식·원자재 토큰(TRADIFI_PERPETUAL)도 포함
+    include_tradfi: bool = True
+    refresh_hours: float = 24.0
+    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE_BASES))
+
+    @field_validator("top_n")
+    @classmethod
+    def _top_ok(cls, v: int) -> int:
+        if not (1 <= v <= 300):
+            raise ValueError("universe.top_n must be 1..300")
+        return v
+
+    @field_validator("refresh_hours")
+    @classmethod
+    def _refresh_ok(cls, v: float) -> float:
+        if v < 1:
+            raise ValueError("universe.refresh_hours must be >= 1")
+        return v
+
+    @field_validator("exclude_bases")
+    @classmethod
+    def _upper(cls, v: list[str]) -> list[str]:
+        return [s.strip().upper() for s in v if s and s.strip()]
 
 
-class StockSymbol(BaseModel):
+class MacroAsset(BaseModel):
     ticker: str
     name: str
-    # 예: SKHYUSDT — 설정 시 Yahoo 대신 Binance USDⓈ-M 선물 kline 사용
-    binance_futures: str | None = None
+
+    @field_validator("ticker", "name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("macro asset ticker/name must not be empty")
+        return v
 
 
-class RsiConfig(BaseModel):
-    period: int = 7
+DEFAULT_MACRO_ASSETS: list[dict[str, str]] = [
+    {"ticker": "NQ=F", "name": "나스닥100 선물"},
+    {"ticker": "ES=F", "name": "S&P500 선물"},
+    {"ticker": "RTY=F", "name": "러셀2000 선물"},
+    {"ticker": "SOXX", "name": "SOXX 반도체 ETF"},
+    {"ticker": "GC=F", "name": "금 선물"},
+    {"ticker": "SI=F", "name": "은 선물"},
+    {"ticker": "PL=F", "name": "백금 선물"},
+    {"ticker": "HG=F", "name": "구리 선물"},
+    {"ticker": "CL=F", "name": "WTI 원유"},
+    {"ticker": "BZ=F", "name": "브렌트유"},
+    {"ticker": "NG=F", "name": "천연가스"},
+    {"ticker": "DX-Y.NYB", "name": "달러인덱스"},
+    {"ticker": "^TNX", "name": "미 10년물 금리"},
+    {"ticker": "TLT", "name": "TLT 미 장기채 ETF"},
+    {"ticker": "^VIX", "name": "VIX"},
+    {"ticker": "JPY=X", "name": "달러/엔"},
+    {"ticker": "KRW=X", "name": "달러/원"},
+    {"ticker": "^KS11", "name": "코스피"},
+    {"ticker": "^N225", "name": "니케이225"},
+    {"ticker": "^HSI", "name": "항셍"},
+]
+
+
+class MacroConfig(BaseModel):
+    """야후 파이낸스로 받는 큰 자산 (지수·원자재·금리·환율)."""
+
+    enabled: bool = True
+    poll_seconds: float = 300.0
+    assets: list[MacroAsset] = Field(
+        default_factory=lambda: [MacroAsset(**a) for a in DEFAULT_MACRO_ASSETS]
+    )
+
+    @field_validator("poll_seconds")
+    @classmethod
+    def _poll_ok(cls, v: float) -> float:
+        if v < 120:
+            raise ValueError("macro.poll_seconds must be >= 120 (Yahoo 차단 방지)")
+        return v
+
+    @model_validator(mode="after")
+    def _unique(self) -> MacroConfig:
+        seen: set[str] = set()
+        for a in self.assets:
+            if a.ticker in seen:
+                raise ValueError(f"macro.assets 중복 티커: {a.ticker}")
+            seen.add(a.ticker)
+        return self
+
+
+class RsiTfConfig(BaseModel):
+    enabled: bool = True
+    overbought_enabled: bool = True
+    overbought: float = 70.0
+    oversold_enabled: bool = True
+    oversold: float = 30.0
+
+    @model_validator(mode="after")
+    def _levels_ok(self) -> RsiTfConfig:
+        if not (50.0 < self.overbought < 100.0):
+            raise ValueError("RSI 과매수 기준은 50~100 사이여야 합니다")
+        if not (0.0 < self.oversold < 50.0):
+            raise ValueError("RSI 과매도 기준은 0~50 사이여야 합니다")
+        return self
+
+
+def _rsi_tf(ob: float, os_: float) -> RsiTfConfig:
+    return RsiTfConfig(overbought=ob, oversold=os_)
+
+
+class RsiAlertConfig(BaseModel):
+    """알람 1: RSI가 과매수 기준을 상향 돌파 / 과매도 기준을 하향 돌파하는 순간 (형성 중 봉 포함)."""
+
+    enabled: bool = True
+    period: int = 14
+    # 알람 후 RSI가 기준에서 이만큼 되돌아가야(과매수면 기준-이 값 이하) 같은 알람이 다시 울림
+    rearm_gap: float = 5.0
+    tf_4h: RsiTfConfig = Field(default_factory=lambda: _rsi_tf(75.0, 25.0))
+    tf_1d: RsiTfConfig = Field(default_factory=lambda: _rsi_tf(70.0, 30.0))
+    tf_1w: RsiTfConfig = Field(default_factory=lambda: _rsi_tf(70.0, 30.0))
+    tf_1mo: RsiTfConfig = Field(default_factory=lambda: _rsi_tf(70.0, 30.0))
 
     @field_validator("period")
     @classmethod
     def _period_ok(cls, v: int) -> int:
-        if v < 2:
-            raise ValueError("rsi.period must be >= 2")
+        if not (2 <= v <= 100):
+            raise ValueError("rsi_alert.period must be 2..100")
         return v
 
+    @field_validator("rearm_gap")
+    @classmethod
+    def _gap_ok(cls, v: float) -> float:
+        if not (0.0 <= v <= 30.0):
+            raise ValueError("RSI 재무장 간격은 0~30 사이여야 합니다")
+        return v
 
-class MacdConfig(BaseModel):
-    fast: int = 12
-    slow: int = 26
-    signal: int = 9
-
-
-class BollingerConfig(BaseModel):
-    period: int = 20
-    stddev: float = 2.0
-
-
-class AtrConfig(BaseModel):
-    period: int = 14
-    sl_mult: float = 1.5
-    tp_mult: float = 3.0
+    def tf(self, tf: str) -> RsiTfConfig:
+        return getattr(self, f"tf_{tf}")
 
 
-class ExtremeRsiRuleConfig(BaseModel):
+class MaTfConfig(BaseModel):
     enabled: bool = True
-    high: float = 80.0
-    low: float = 23.0
-    # True: 형성 중 봉 + 실시간 가격으로 RSI 돌파 즉시 알람 (봉 마감 대기 안 함)
-    live: bool = True
-
-
-class RsiMacdCrossRuleConfig(BaseModel):
-    """
-    알람2: 15m RSI가 oversold 이하로 내려갔다가 reclaim 이상으로 올라오는 순간.
-    형성 중 봉 포함, USDT-M 무기한 전 종목, poll_seconds마다 갱신.
-    live=true 이면 아래 워처가 담당하고, 기존 MACD 크로스 규칙은 끄지 않아도 평가하지 않음.
-    """
-
-    enabled: bool = True
-    timeframe: Timeframe = "15m"
-    oversold: float = 30.0
-    # 하강(oversold 이하) 후 이 값 이상으로 올라올 때 알람. oversold와 같으면 '살짝만 넘어도' 울림.
-    reclaim: float = 30.0
-    overbought: float = 70.0
-    live: bool = True
-    # True면 공통 poll_interval_seconds 사용
-    follow_global_poll: bool = True
-    poll_seconds: float = 60.0
-    cooldown_seconds: int = 900
-    max_workers: int = 12
-    history_bars: int = 50
-    symbol_refresh_hours: float = 24.0
-
-    @field_validator("poll_seconds")
-    @classmethod
-    def _poll_ok(cls, v: float) -> float:
-        if v < 15:
-            raise ValueError("rsi_macd_cross.poll_seconds must be >= 15")
-        return v
-
-    @model_validator(mode="after")
-    def _reclaim_ok(self) -> RsiMacdCrossRuleConfig:
-        if self.reclaim < self.oversold:
-            raise ValueError("rsi_macd_cross.reclaim must be >= oversold")
-        return self
-
-
-class DivergenceRuleConfig(BaseModel):
-    enabled: bool = False
-    oversold: float = 30.0
-    overbought: float = 70.0
-    lookback: int = 60
-    pivot_left: int = 3
-    pivot_right: int = 3
-    use_rsi: bool = True
-    use_macd: bool = True
-
-
-class BbSqueezeRuleConfig(BaseModel):
-    enabled: bool = False
-    squeeze_ratio: float = 0.05
-
-
-DEFAULT_FUTURES_EXCLUDE_BASES = [
-    "BTC",
-    "ETH",
-    "BNB",
-    "SOL",
-    "XRP",
-    "DOGE",
-    "ADA",
-    "AVAX",
-    "LINK",
-    "DOT",
-    "TRX",
-    "LTC",
-    "BCH",
-    "NEAR",
-    "SUI",
-    "PEPE",
-    "WLD",
-    "UNI",
-    "AAVE",
-    "FIL",
-    "TON",
-    "SHIB",
-    "APT",
-    "ARB",
-    "OP",
-    "ATOM",
-    "ICP",
-    "HYPE",
-    "USDC",
-    "FDUSD",
-    "TUSD",
-    "DAI",
-    "USDE",
-    "USDP",
-    "BUSD",
-    "PYUSD",
-]
-
-
-class VolumeSpikeRuleConfig(BaseModel):
-    """
-    잡코인 펌프 초입 알람 (1+2+3 필터 AND, 형성 중 봉 포함):
-    1) 최근 window_bars 동안 가격 min_price_pct% 이상 + 최신봉 거래량 volume_mult배
-    2) 그 직전 quiet_bars 동안 고저 폭이 quiet_range_pct% 이하 (바닥 횡보)
-    3) exclude_bases 메이저 제외, 선물 USDT 퍼페추얼 전체
-    """
-
-    enabled: bool = True
-    timeframe: Timeframe = "3m"
-    window_bars: int = 5  # 가격 급등 구간 (3m×5=15분)
-    min_price_pct: float = 15.0
-    volume_lookback: int = 20
-    volume_mult: float = 4.0
-    quiet_bars: int = 40  # 횡보 구간 (3m×40≈2시간)
-    quiet_range_pct: float = 10.0
-    cooldown_seconds: int = 600
-    poll_seconds: float = 30.0  # 형성 중 봉 감시 주기
-    max_workers: int = 15
-    symbol_refresh_hours: float = 24.0
-    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
-
-    @field_validator("window_bars", "volume_lookback", "quiet_bars")
-    @classmethod
-    def _bars_ok(cls, v: int) -> int:
-        if v < 2:
-            raise ValueError("bar counts must be >= 2")
-        return v
-
-    @field_validator("min_price_pct", "volume_mult", "quiet_range_pct")
-    @classmethod
-    def _pos_ok(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("must be > 0")
-        return v
-
-    @field_validator("poll_seconds")
-    @classmethod
-    def _poll_ok(cls, v: float) -> float:
-        if v < 30:
-            raise ValueError("volume_spike.poll_seconds must be >= 30")
-        return v
-
-    @property
-    def history_bars(self) -> int:
-        return self.quiet_bars + self.window_bars + self.volume_lookback + 5
-
-
-class AccumulationRuleConfig(BaseModel):
-    """
-    알트코인 신호 1 — OI 변동 (프리랠리 관심, 펀딩 없음).
-
-    게이트: 아직 수직 펌프 아님 + 최소 OI + 스테이블/메이저 제외.
-    신호: **OI↑ 필수** + (타이트 박스 / 거래량 회복 / BTC 대비 강세) 중 1개 이상.
-      - tight: 14일 고저가 타이트
-      - oi: 7일 달러 OI 상승
-      - vol: 최근 거래량이 직전 평균 대비 회복
-      - rs: 같은 기간 BTC보다 덜 빠지거나 더 강함
-    """
-
-    enabled: bool = True
-    range_days: int = 14
-    range_pct: float = 38.0  # 게이트: 이미 수직으로 간 차트 제외
-    tight_range_pct: float = 26.0  # 신호: 타이트 박스
-    oi_days: int = 7
-    oi_change_pct: float = 15.0
-    min_oi_usdt: float = 1_500_000.0
-    trend_days: int = 7
-    trend_min_pct: float = -30.0
-    trend_max_pct: float = 22.0
-    vol_recent_bars: int = 3
-    vol_lookback: int = 10
-    vol_mult: float = 1.4
-    btc_rs_pct: float = 4.5  # alt_7d - btc_7d (0이면 RS 신호 끔)
-    cooldown_seconds: int = 86400  # 24h
-    poll_seconds: float = 3600.0
-    max_workers: int = 8
-    symbol_refresh_hours: float = 24.0
-    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
-
-    @field_validator("range_days", "oi_days", "trend_days", "vol_recent_bars", "vol_lookback")
-    @classmethod
-    def _days_ok(cls, v: int) -> int:
-        if v < 2:
-            raise ValueError("counts must be >= 2")
-        if v > 30:
-            raise ValueError("lookback max 30 (Binance hist is ~1 month)")
-        return v
-
-    @field_validator("range_pct", "tight_range_pct", "oi_change_pct", "min_oi_usdt", "vol_mult")
-    @classmethod
-    def _pos_ok(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("must be > 0")
-        return v
-
-    @field_validator("poll_seconds")
-    @classmethod
-    def _poll_ok(cls, v: float) -> float:
-        if v < 300:
-            raise ValueError("accumulation.poll_seconds must be >= 300")
-        return v
-
-
-class AbsorptionBarRuleConfig(BaseModel):
-    """
-    알트코인 신호 2 — 매집봉(흡수봉):
-    윗꼬리 김 + 거래량 급증 + 종가는 거의 안 움직임.
-    형성 중 봉 포함, 메이저/스테이블 제외 선물 USDT 퍼페추얼.
-    """
-
-    enabled: bool = True
-    timeframe: Timeframe = "4h"
-    wick_ratio: float = 0.62  # 윗꼬리 / (고-저)
-    max_body_ratio: float = 0.25  # 몸통 / (고-저)
-    max_close_pct: float = 2.5  # |종가-전봉종가| %
-    min_range_pct: float = 1.8  # 봉 자체 고저가 너무 작으면 제외
-    volume_lookback: int = 20
-    volume_mult: float = 3.5
-    cooldown_seconds: int = 28800  # 8h, 연속 4h봉 중복 완화
-    poll_seconds: float = 60.0
-    max_workers: int = 10
-    symbol_refresh_hours: float = 24.0
-    exclude_bases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUTURES_EXCLUDE_BASES))
-
-    @field_validator("volume_lookback")
-    @classmethod
-    def _lookback_ok(cls, v: int) -> int:
-        if v < 5:
-            raise ValueError("volume_lookback must be >= 5")
-        return v
-
-    @field_validator("wick_ratio", "max_body_ratio")
-    @classmethod
-    def _ratio_ok(cls, v: float) -> float:
-        if not (0.05 <= v <= 0.95):
-            raise ValueError("ratio must be 0.05..0.95")
-        return v
-
-    @field_validator("max_close_pct", "min_range_pct", "volume_mult")
-    @classmethod
-    def _pos_ok(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("must be > 0")
-        return v
-
-    @field_validator("poll_seconds")
-    @classmethod
-    def _poll_ok(cls, v: float) -> float:
-        if v < 30:
-            raise ValueError("absorption_bar.poll_seconds must be >= 30")
-        return v
-
-
-class Ma20TfConfig(BaseModel):
-    """타임프레임별 MA20 상단 근접 설정."""
-
-    enabled: bool = True
-    # 가격이 MA20 위에서 (price-MA)/MA*100 이 이 값 이하로 들어올 때
+    # 이격% = (가격-선)/선*100 의 절댓값이 이 값 이내로 들어오면 근접
     proximity_pct: float = 1.0
+    from_above: bool = True
+    from_below: bool = True
 
     @field_validator("proximity_pct")
     @classmethod
     def _prox_ok(cls, v: float) -> float:
-        if not (0.05 <= v <= 20.0):
-            raise ValueError("proximity_pct must be 0.05..20")
+        if not (0.05 <= v <= 30.0):
+            raise ValueError("근접 %는 0.05~30 사이여야 합니다")
         return v
 
 
-class Ma20ApproachRuleConfig(BaseModel):
-    """
-    MA20 위에서 아래로 근접:
-    가격이 SMA20 위에 있다가, 이격이 proximity_pct% 이내로 좁혀질 때 알람.
-    1h / 4h / 1d 각각 on/off + 근접% 개별 설정.
-    USDT-M 무기한 전 종목, 형성 중 봉 포함.
-    """
+def _ma_tf(pct: float) -> MaTfConfig:
+    return MaTfConfig(proximity_pct=pct)
+
+
+class MaLineConfig(BaseModel):
+    enabled: bool = True
+    tf_4h: MaTfConfig = Field(default_factory=lambda: _ma_tf(1.0))
+    tf_1d: MaTfConfig = Field(default_factory=lambda: _ma_tf(1.5))
+    tf_1w: MaTfConfig = Field(default_factory=lambda: _ma_tf(3.0))
+    tf_1mo: MaTfConfig = Field(default_factory=lambda: _ma_tf(5.0))
+
+    def tf(self, tf: str) -> MaTfConfig:
+        return getattr(self, f"tf_{tf}")
+
+
+# (설정 키, 종류, 기간, 표시 이름)
+MA_LINES: tuple[tuple[str, str, int, str], ...] = (
+    ("ema50", "ema", 50, "EMA50"),
+    ("ema200", "ema", 200, "EMA200"),
+    ("vwma100", "vwma", 100, "VWMA100"),
+)
+
+
+class MaAlertConfig(BaseModel):
+    """알람 2: 가격이 EMA50 / EMA200 / VWMA100 위·아래에서 근접 밴드 안으로 들어오는 순간."""
 
     enabled: bool = True
-    period: int = 20
-    tf_1h: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=0.5))
-    tf_4h: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=1.0))
-    tf_1d: Ma20TfConfig = Field(default_factory=lambda: Ma20TfConfig(enabled=True, proximity_pct=1.5))
-    poll_seconds: float = 60.0
-    cooldown_seconds: int = 14400  # 종목×타임프레임당 4시간
-    max_workers: int = 10
-    symbol_refresh_hours: float = 24.0
+    # 알람 후 이격이 근접%×이 배수 이상으로 벌어져야 같은 알람이 다시 울림 (밴드 경계 잔진동 방지)
+    rearm_mult: float = 3.0
+    ema50: MaLineConfig = Field(default_factory=MaLineConfig)
+    ema200: MaLineConfig = Field(default_factory=MaLineConfig)
+    vwma100: MaLineConfig = Field(default_factory=MaLineConfig)
 
-    @field_validator("period")
+    @field_validator("rearm_mult")
     @classmethod
-    def _period_ok(cls, v: int) -> int:
-        if v < 5:
-            raise ValueError("ma20_approach.period must be >= 5")
+    def _mult_ok(cls, v: float) -> float:
+        if not (1.0 <= v <= 10.0):
+            raise ValueError("이평 재무장 배수는 1~10 사이여야 합니다")
         return v
+
+    def line(self, key: str) -> MaLineConfig:
+        return getattr(self, key)
+
+
+class AppConfig(BaseModel):
+    # 바이낸스 선물 시세·봉 갱신 주기
+    poll_seconds: float = 60.0
+    status_log_seconds: float = 600.0
+    universe: UniverseConfig = Field(default_factory=UniverseConfig)
+    macro: MacroConfig = Field(default_factory=MacroConfig)
+    rsi_alert: RsiAlertConfig = Field(default_factory=RsiAlertConfig)
+    ma_alert: MaAlertConfig = Field(default_factory=MaAlertConfig)
 
     @field_validator("poll_seconds")
     @classmethod
     def _poll_ok(cls, v: float) -> float:
         if v < 30:
-            raise ValueError("ma20_approach.poll_seconds must be >= 30")
+            raise ValueError("poll_seconds must be >= 30 (바이낸스 요청 한도)")
         return v
 
-    def enabled_timeframes(self) -> list[tuple[str, Ma20TfConfig]]:
-        out: list[tuple[str, Ma20TfConfig]] = []
-        for tf, cfg in (("1h", self.tf_1h), ("4h", self.tf_4h), ("1d", self.tf_1d)):
-            if cfg.enabled:
-                out.append((tf, cfg))
-        return out
-
-
-class RulesConfig(BaseModel):
-    extreme_rsi: ExtremeRsiRuleConfig = Field(default_factory=ExtremeRsiRuleConfig)
-    rsi_macd_cross: RsiMacdCrossRuleConfig = Field(default_factory=RsiMacdCrossRuleConfig)
-    divergence: DivergenceRuleConfig = Field(default_factory=DivergenceRuleConfig)
-    bb_squeeze: BbSqueezeRuleConfig = Field(default_factory=BbSqueezeRuleConfig)
-    volume_spike: VolumeSpikeRuleConfig = Field(default_factory=VolumeSpikeRuleConfig)
-    accumulation: AccumulationRuleConfig = Field(default_factory=AccumulationRuleConfig)
-    absorption_bar: AbsorptionBarRuleConfig = Field(default_factory=AbsorptionBarRuleConfig)
-    ma20_approach: Ma20ApproachRuleConfig = Field(default_factory=Ma20ApproachRuleConfig)
-
-
-class HistoryConfig(BaseModel):
-    max_candles: int = 300
-    db_path: str = "data/candles.db"
-
-
-class UniverseConfig(BaseModel):
-    """바이낸스 상장 페어 중 거래량 상위 %를 매일 갱신해 감시."""
-
-    enabled: bool = True
-    # binance_spot: 현물 USDT (코인). 주식/ETF는 바이낸스에 거의 없음.
-    source: Literal["binance_spot"] = "binance_spot"
-    quote_asset: str = "USDT"
-    volume_lookback_days: int = 7
-    top_percentile: float = 30.0  # 부하 크면 15
-    max_symbols: int = 60  # t3.micro 안전 상한
-    refresh_hours: float = 24.0
-    exclude_leveraged: bool = True
-    exclude_stablecoins: bool = True
-    include_static_stocks: bool = False  # True면 config의 kr/us 주식도 함께
-
-    @field_validator("top_percentile")
+    @field_validator("status_log_seconds")
     @classmethod
-    def _pct_ok(cls, v: float) -> float:
-        if not (1.0 <= v <= 100.0):
-            raise ValueError("universe.top_percentile must be 1..100")
+    def _status_ok(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("status_log_seconds must be >= 0")
         return v
 
 
-class AppConfig(BaseModel):
-    crypto: list[CryptoSymbol] = Field(default_factory=list)
-    kr_stocks: list[StockSymbol] = Field(default_factory=list)
-    us_stocks: list[StockSymbol] = Field(default_factory=list)
-    universe: UniverseConfig = Field(default_factory=UniverseConfig)
-    poll_interval_seconds: float = 5.0
-    timeframe: Timeframe = "1h"
-    # 알람은 완성 봉 마감 기준
-    signal_on_closed_bar: bool = True
-    rsi: RsiConfig = Field(default_factory=RsiConfig)
-    macd: MacdConfig = Field(default_factory=MacdConfig)
-    bollinger: BollingerConfig = Field(default_factory=BollingerConfig)
-    atr: AtrConfig = Field(default_factory=AtrConfig)
-    rules: RulesConfig = Field(default_factory=RulesConfig)
-    alert_cooldown_seconds: int = 300
-    history: HistoryConfig = Field(default_factory=HistoryConfig)
-    status_log_seconds: float = 15.0
-
-    @field_validator("poll_interval_seconds")
-    @classmethod
-    def _poll_ok(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("poll_interval_seconds must be > 0")
-        return v
+def default_config_path() -> Path:
+    return project_root() / "config.yaml"
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
-    config_path = Path(path) if path else Path(__file__).resolve().parent.parent / "config.yaml"
+    config_path = Path(path) if path else default_config_path()
     if not config_path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
     with config_path.open(encoding="utf-8") as f:
         data: dict[str, Any] = yaml.safe_load(f) or {}
-    # 구버전 rsi.min/max 호환: 무시하고 새 스키마로 로드
-    if isinstance(data.get("rsi"), dict):
-        legacy = data["rsi"]
-        data["rsi"] = {"period": legacy.get("period", 7)}
-    # reclaim 미설정 시 oversold와 동일 (기존 동작)
-    rules = data.get("rules")
-    if isinstance(rules, dict):
-        rmc = rules.get("rsi_macd_cross")
-        if isinstance(rmc, dict) and "reclaim" not in rmc:
-            rmc["reclaim"] = float(rmc.get("oversold", 30.0))
     return AppConfig.model_validate(data)
 
 
-def default_config_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_HEADER = (
+    "# stock-monitor config (웹 설정 페이지에서 저장하면 이 파일이 다시 쓰입니다)\n"
+    "# 타임프레임: tf_4h=4시간봉, tf_1d=일봉, tf_1w=주봉, tf_1mo=월봉\n"
+    "# 알람 1 rsi_alert: RSI 과매수 상향 돌파 / 과매도 하향 돌파 (형성 중 봉, 봉당 1회)\n"
+    "# 알람 2 ma_alert: EMA50 / EMA200 / VWMA100 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)\n"
+)
 
 
 def save_config(config: AppConfig, path: str | Path | None = None) -> Path:
@@ -461,22 +278,9 @@ def save_config(config: AppConfig, path: str | Path | None = None) -> Path:
         sort_keys=False,
         default_flow_style=False,
     )
-    header = (
-        "# stock-monitor config\n"
-        "# timeframe: 1m | 3m | 5m | 15m | 30m | 1h | 4h | 1d\n"
-        "# 알람은 signal_on_closed_bar=true 일 때 봉 마감 기준\n"
-    )
-    config_path.write_text(header + text, encoding="utf-8")
+    config_path.write_text(CONFIG_HEADER + text, encoding="utf-8")
     return config_path
 
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
-
-
-def resolve_db_path(config: AppConfig) -> Path:
-    path = Path(config.history.db_path)
-    if not path.is_absolute():
-        path = project_root() / path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path

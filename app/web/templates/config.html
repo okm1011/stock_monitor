@@ -20,351 +20,134 @@
     <h2>공통</h2>
     <div class="row">
       <div>
-        <label>폴링 간격(초)</label>
-        <input type="number" step="any" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}" required />
+        <label>바이낸스 갱신 간격(초, 30 이상)</label>
+        <input type="number" step="any" name="poll_seconds" value="{{ cfg.poll_seconds }}" required />
       </div>
       <div>
-        <label>타임프레임</label>
-        <select name="timeframe">
-          {% for tf in timeframes %}
-          <option value="{{ tf }}" {% if cfg.timeframe == tf %}selected{% endif %}>{{ tf }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>알람 쿨다운(초)</label>
-        <input type="number" name="alert_cooldown_seconds" value="{{ cfg.alert_cooldown_seconds }}" required />
-      </div>
-      <div>
-        <label>상태 로그 간격(초)</label>
+        <label>상태 로그 간격(초, 0=끔)</label>
         <input type="number" step="any" name="status_log_seconds" value="{{ cfg.status_log_seconds }}" required />
       </div>
     </div>
-    <label>RSI period</label>
-    <input type="number" name="rsi_period" value="{{ cfg.rsi.period }}" required />
+    <p class="sub">알람은 형성 중인 봉 기준으로 즉시 울리고, 같은 봉에서 같은 신호는 1번만 옵니다.</p>
   </div>
 
   <div class="card">
-    <h2>유니버스</h2>
+    <h2>감시 대상 · 바이낸스 선물</h2>
+    <div class="check">
+      <input type="checkbox" id="universe_enabled" name="universe_enabled" {% if cfg.universe.enabled %}checked{% endif %} />
+      <label for="universe_enabled">바이낸스 USDⓈ-M 선물 24시간 거래대금 상위 감시</label>
+    </div>
     <div class="row">
       <div>
-        <label>상위 %</label>
-        <input type="number" step="any" name="universe_top_percentile" value="{{ cfg.universe.top_percentile }}" required />
+        <label>상위 몇 개</label>
+        <input type="number" name="universe_top_n" value="{{ cfg.universe.top_n }}" required />
       </div>
       <div>
-        <label>max symbols</label>
-        <input type="number" name="universe_max_symbols" value="{{ cfg.universe.max_symbols }}" required />
+        <label>목록 갱신 주기(시간)</label>
+        <input type="number" step="any" name="universe_refresh_hours" value="{{ cfg.universe.refresh_hours }}" required />
       </div>
     </div>
     <div class="check">
-      <input type="checkbox" id="include_static_stocks" name="include_static_stocks" {% if cfg.universe.include_static_stocks %}checked{% endif %} />
-      <label for="include_static_stocks">고정 주식(us_stocks) 포함</label>
+      <input type="checkbox" id="universe_include_tradfi" name="universe_include_tradfi" {% if cfg.universe.include_tradfi %}checked{% endif %} />
+      <label for="universe_include_tradfi">주식·원자재 토큰 포함 (NVDA, SOXL, 금 XAU 등)</label>
     </div>
+    <label>제외할 종목 (base 심볼, 쉼표 구분)</label>
+    <textarea name="universe_exclude" rows="2">{{ exclude_text }}</textarea>
   </div>
 
   <div class="card">
-    <h2>규칙 on/off</h2>
+    <h2>감시 대상 · 큰 자산 (Yahoo)</h2>
     <div class="check">
-      <input type="checkbox" id="extreme_rsi_enabled" name="extreme_rsi_enabled" {% if cfg.rules.extreme_rsi.enabled %}checked{% endif %} />
-      <label for="extreme_rsi_enabled">1 RSI 과매수/과매도</label>
+      <input type="checkbox" id="macro_enabled" name="macro_enabled" {% if cfg.macro.enabled %}checked{% endif %} />
+      <label for="macro_enabled">야후 파이낸스 자산 감시</label>
     </div>
-    <div class="row">
-      <div>
-        <label>RSI high</label>
-        <input type="number" step="any" name="extreme_rsi_high" value="{{ cfg.rules.extreme_rsi.high }}" required />
-      </div>
-      <div>
-        <label>RSI low</label>
-        <input type="number" step="any" name="extreme_rsi_low" value="{{ cfg.rules.extreme_rsi.low }}" required />
-      </div>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="extreme_rsi_live" name="extreme_rsi_live" {% if cfg.rules.extreme_rsi.live %}checked{% endif %} />
-      <label for="extreme_rsi_live">1번 라이브 (공통 타임프레임 형성 중 봉으로 극단 진입)</label>
-    </div>
-    <p class="sub">위 라이브는 1번(과매수/과매도 진입) 전용입니다. 15분봉 RSI 30 재돌파는 아래 2번입니다.</p>
-    <div class="check">
-      <input type="checkbox" id="rsi_macd_enabled" name="rsi_macd_enabled" {% if cfg.rules.rsi_macd_cross.enabled %}checked{% endif %} />
-      <label for="rsi_macd_enabled">2 RSI 하강 후 재돌파 (전종목)</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="divergence_enabled" name="divergence_enabled" {% if cfg.rules.divergence.enabled %}checked{% endif %} />
-      <label for="divergence_enabled">3 다이버전스</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="bb_squeeze_enabled" name="bb_squeeze_enabled" {% if cfg.rules.bb_squeeze.enabled %}checked{% endif %} />
-      <label for="bb_squeeze_enabled">4 BB 스퀴즈</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="volume_spike_enabled" name="volume_spike_enabled" {% if cfg.rules.volume_spike.enabled %}checked{% endif %} />
-      <label for="volume_spike_enabled">5 펌프 초입</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="accumulation_enabled" name="accumulation_enabled" {% if cfg.rules.accumulation.enabled %}checked{% endif %} />
-      <label for="accumulation_enabled">알트코인 신호 1 · OI 변동</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="absorption_bar_enabled" name="absorption_bar_enabled" {% if cfg.rules.absorption_bar.enabled %}checked{% endif %} />
-      <label for="absorption_bar_enabled">알트코인 신호 2 · 매집봉</label>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="ma20_approach_enabled" name="ma20_approach_enabled" {% if cfg.rules.ma20_approach.enabled %}checked{% endif %} />
-      <label for="ma20_approach_enabled">MA20 위에서 아래로 근접</label>
-    </div>
+    <label>갱신 간격(초, 120 이상)</label>
+    <input type="number" step="any" name="macro_poll_seconds" value="{{ cfg.macro.poll_seconds }}" required />
+    <label>자산 목록 (한 줄에 <b>티커, 이름</b>)</label>
+    <textarea name="macro_assets" rows="12">{{ macro_text }}</textarea>
+    <p class="sub">티커는 finance.yahoo.com 표기 그대로 (예: GC=F, ^TNX, SOXX). 거래량이 없는 지수·금리·환율은 VWMA100 알람이 자동으로 빠집니다. 4시간봉은 1시간봉을 세션 시작부터 4개씩 묶어 만듭니다.</p>
   </div>
 
   <div class="card">
-    <h2>2번 RSI 하강 후 재돌파</h2>
-    <p class="sub">USDT-M 전 종목. 선택한 봉의 RSI가 하강 기준 이하로 내려갔다가, 재돌파 기준 이상으로 올라오는 순간 알람. 봉 마감 대기 없음.</p>
-    <div class="row">
-      <div>
-        <label>대상봉</label>
-        <select name="rsi_reclaim_timeframe">
-          {% for tf in timeframes %}
-          <option value="{{ tf }}" {% if cfg.rules.rsi_macd_cross.timeframe == tf %}selected{% endif %}>{{ tf }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>하강 기준 (이 값 이하로 내려가야 함)</label>
-        <input type="number" step="any" name="rsi_macd_oversold" value="{{ cfg.rules.rsi_macd_cross.oversold }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>재돌파 기준 (이 값 이상 올라올 때 알람)</label>
-        <input type="number" step="any" name="rsi_reclaim_level" value="{{ cfg.rules.rsi_macd_cross.reclaim }}" required />
-      </div>
-      <div>
-        <label>종목당 쿨다운(초)</label>
-        <input type="number" name="rsi_reclaim_cooldown" value="{{ cfg.rules.rsi_macd_cross.cooldown_seconds }}" required />
-      </div>
-    </div>
-    <p class="sub">예: 하강 30 / 재돌파 35 → 30 이하로 찍은 뒤 35를 상향 돌파할 때 알람. 둘이 같으면 살짝만 넘어도 울립니다.</p>
+    <h2>알람 1 · RSI 과매수 / 과매도</h2>
     <div class="check">
-      <input type="checkbox" id="rsi_reclaim_follow_poll" name="rsi_reclaim_follow_poll" {% if cfg.rules.rsi_macd_cross.follow_global_poll %}checked{% endif %} />
-      <label for="rsi_reclaim_follow_poll">가격 업데이트 = 공통 폴링 간격 (지금 {{ cfg.poll_interval_seconds }}초)</label>
+      <input type="checkbox" id="rsi_enabled" name="rsi_enabled" {% if cfg.rsi_alert.enabled %}checked{% endif %} />
+      <label for="rsi_enabled">사용</label>
     </div>
     <div class="row">
       <div>
-        <label>직접 지정 간격(초)</label>
-        <input type="number" step="any" name="rsi_reclaim_poll" value="{{ cfg.rules.rsi_macd_cross.poll_seconds }}" required />
+        <label>RSI 기간</label>
+        <input type="number" name="rsi_period" value="{{ cfg.rsi_alert.period }}" required />
       </div>
-      <div></div>
+      <div>
+        <label>재알람 조건 (기준에서 몇 포인트 되돌아가야)</label>
+        <input type="number" step="any" name="rsi_rearm_gap" value="{{ cfg.rsi_alert.rearm_gap }}" required />
+      </div>
     </div>
-    <p class="sub">공통 폴링을 체크하면 위의 직접 지정은 무시됩니다. 체크를 끄면 이 규칙만 다른 주기로 시세를 받습니다.</p>
+    <p class="sub">과매수: RSI가 기준을 위로 넘는 순간 · 과매도: 기준 아래로 내려가는 순간. 예) 과매수 70, 재알람 5 → 알람 후 RSI가 65 이하로 내려갔다가 다시 70을 넘어야 또 울림.</p>
+    {% for tf in timeframes %}
+    {% set t = cfg.rsi_alert.tf(tf) %}
+    <div class="tfblock">
+      <div class="check">
+        <input type="checkbox" id="rsi_{{ tf }}_enabled" name="rsi_{{ tf }}_enabled" {% if t.enabled %}checked{% endif %} />
+        <label for="rsi_{{ tf }}_enabled"><b>{{ tf_label[tf] }}</b></label>
+      </div>
+      <div class="row">
+        <div class="inline">
+          <input type="checkbox" id="rsi_{{ tf }}_ob_on" name="rsi_{{ tf }}_ob_on" {% if t.overbought_enabled %}checked{% endif %} />
+          <label for="rsi_{{ tf }}_ob_on">과매수 ≥</label>
+          <input type="number" step="any" name="rsi_{{ tf }}_ob" value="{{ t.overbought }}" required />
+        </div>
+        <div class="inline">
+          <input type="checkbox" id="rsi_{{ tf }}_os_on" name="rsi_{{ tf }}_os_on" {% if t.oversold_enabled %}checked{% endif %} />
+          <label for="rsi_{{ tf }}_os_on">과매도 ≤</label>
+          <input type="number" step="any" name="rsi_{{ tf }}_os" value="{{ t.oversold }}" required />
+        </div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
 
   <div class="card">
-    <h2>펌프 초입 (5번)</h2>
-    <div class="row">
-      <div>
-        <label>가격 % (min)</label>
-        <input type="number" step="any" name="vs_min_price_pct" value="{{ cfg.rules.volume_spike.min_price_pct }}" required />
-      </div>
-      <div>
-        <label>거래량 배수</label>
-        <input type="number" step="any" name="vs_volume_mult" value="{{ cfg.rules.volume_spike.volume_mult }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>횡보 고저 %</label>
-        <input type="number" step="any" name="vs_quiet_range_pct" value="{{ cfg.rules.volume_spike.quiet_range_pct }}" required />
-      </div>
-      <div>
-        <label>폴링(초)</label>
-        <input type="number" step="any" name="vs_poll_seconds" value="{{ cfg.rules.volume_spike.poll_seconds }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>쿨다운(초)</label>
-        <input type="number" name="vs_cooldown_seconds" value="{{ cfg.rules.volume_spike.cooldown_seconds }}" required />
-      </div>
-      <div>
-        <label>window bars</label>
-        <input type="number" name="vs_window_bars" value="{{ cfg.rules.volume_spike.window_bars }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>volume lookback</label>
-        <input type="number" name="vs_volume_lookback" value="{{ cfg.rules.volume_spike.volume_lookback }}" required />
-      </div>
-      <div>
-        <label>quiet bars</label>
-        <input type="number" name="vs_quiet_bars" value="{{ cfg.rules.volume_spike.quiet_bars }}" required />
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>알트코인 신호 1 · OI 변동</h2>
-    <p class="sub">아직 안 터진 알트 + OI↑ 필수 + (타이트 박스 / 거래량 회복 / BTC 대비 강세) 중 1개</p>
-    <div class="row">
-      <div>
-        <label>횡보 일수</label>
-        <input type="number" name="acc_range_days" value="{{ cfg.rules.accumulation.range_days }}" required />
-      </div>
-      <div>
-        <label>펌프 제외 고저 % (게이트)</label>
-        <input type="number" step="any" name="acc_range_pct" value="{{ cfg.rules.accumulation.range_pct }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>타이트 박스 %</label>
-        <input type="number" step="any" name="acc_tight_range_pct" value="{{ cfg.rules.accumulation.tight_range_pct }}" required />
-      </div>
-      <div>
-        <label>거래량 회복 배수</label>
-        <input type="number" step="any" name="acc_vol_mult" value="{{ cfg.rules.accumulation.vol_mult }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>OI 일수</label>
-        <input type="number" name="acc_oi_days" value="{{ cfg.rules.accumulation.oi_days }}" required />
-      </div>
-      <div>
-        <label>OI 상승 %</label>
-        <input type="number" step="any" name="acc_oi_change_pct" value="{{ cfg.rules.accumulation.oi_change_pct }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>최소 OI (USDT)</label>
-        <input type="number" step="any" name="acc_min_oi_usdt" value="{{ cfg.rules.accumulation.min_oi_usdt }}" required />
-      </div>
-      <div>
-        <label>추세 일수</label>
-        <input type="number" name="acc_trend_days" value="{{ cfg.rules.accumulation.trend_days }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>7일 수익률 하한 %</label>
-        <input type="number" step="any" name="acc_trend_min_pct" value="{{ cfg.rules.accumulation.trend_min_pct }}" required />
-      </div>
-      <div>
-        <label>7일 수익률 상한 %</label>
-        <input type="number" step="any" name="acc_trend_max_pct" value="{{ cfg.rules.accumulation.trend_max_pct }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>BTC 대비 상대강도 %</label>
-        <input type="number" step="any" name="acc_btc_rs_pct" value="{{ cfg.rules.accumulation.btc_rs_pct }}" required />
-      </div>
-      <div>
-        <label>폴링(초)</label>
-        <input type="number" step="any" name="acc_poll_seconds" value="{{ cfg.rules.accumulation.poll_seconds }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>쿨다운(초)</label>
-        <input type="number" name="acc_cooldown_seconds" value="{{ cfg.rules.accumulation.cooldown_seconds }}" required />
-      </div>
-      <div></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>알트코인 신호 2 · 매집봉</h2>
-    <p class="sub">윗꼬리 김 + 거래량 급증 + 종가는 거의 안 움직임 (4h 형성 중 봉)</p>
-    <div class="row">
-      <div>
-        <label>윗꼬리 비율 (0~1)</label>
-        <input type="number" step="any" name="ab_wick_ratio" value="{{ cfg.rules.absorption_bar.wick_ratio }}" required />
-      </div>
-      <div>
-        <label>최대 몸통 비율</label>
-        <input type="number" step="any" name="ab_max_body_ratio" value="{{ cfg.rules.absorption_bar.max_body_ratio }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>종가 변화 상한 %</label>
-        <input type="number" step="any" name="ab_max_close_pct" value="{{ cfg.rules.absorption_bar.max_close_pct }}" required />
-      </div>
-      <div>
-        <label>최소 봉 고저 %</label>
-        <input type="number" step="any" name="ab_min_range_pct" value="{{ cfg.rules.absorption_bar.min_range_pct }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>거래량 배수</label>
-        <input type="number" step="any" name="ab_volume_mult" value="{{ cfg.rules.absorption_bar.volume_mult }}" required />
-      </div>
-      <div>
-        <label>volume lookback</label>
-        <input type="number" name="ab_volume_lookback" value="{{ cfg.rules.absorption_bar.volume_lookback }}" required />
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>폴링(초)</label>
-        <input type="number" step="any" name="ab_poll_seconds" value="{{ cfg.rules.absorption_bar.poll_seconds }}" required />
-      </div>
-      <div>
-        <label>쿨다운(초)</label>
-        <input type="number" name="ab_cooldown_seconds" value="{{ cfg.rules.absorption_bar.cooldown_seconds }}" required />
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>MA20 위에서 아래로 근접</h2>
-    <p class="sub">USDT-M 전 종목. 가격이 SMA20 위에 있다가 이격이 근접% 이내로 좁혀질 때 알람 (아래에서 올라오는 경우는 제외). 1h/4h/1d 각각 켜고 끌 수 있습니다.</p>
-    <p class="sub">권장 근접%: 1h 0.5 · 4h 1.0 · 1d 1.5. 너무 작으면(0.2) 노이즈, 너무 크면(3+) 지지 확인이 늦습니다.</p>
+    <h2>알람 2 · EMA50 / EMA200 / VWMA100 근접</h2>
     <div class="check">
-      <input type="checkbox" id="ma20_tf_1h" name="ma20_tf_1h" {% if cfg.rules.ma20_approach.tf_1h.enabled %}checked{% endif %} />
-      <label for="ma20_tf_1h">1시간 봉</label>
+      <input type="checkbox" id="ma_enabled" name="ma_enabled" {% if cfg.ma_alert.enabled %}checked{% endif %} />
+      <label for="ma_enabled">사용</label>
     </div>
-    <div class="row">
-      <div>
-        <label>1h 근접 % (이격 ≤ 이 값)</label>
-        <input type="number" step="any" name="ma20_prox_1h" value="{{ cfg.rules.ma20_approach.tf_1h.proximity_pct }}" required />
+    <p class="sub">이격% = (가격 − 선) ÷ 선 × 100. 선 <b>위</b>에서 내려와 +근접% 이내로 들어오거나, 선 <b>아래</b>에서 올라와 −근접% 이내로 들어오는 순간 알람. 한 번에 선을 관통해도 알람이 옵니다.</p>
+    <label>재알람 배수 (알람 후 이격이 근접%×배수 이상 벌어져야 다시 울림)</label>
+    <input type="number" step="any" name="ma_rearm_mult" value="{{ cfg.ma_alert.rearm_mult }}" required />
+    <p class="sub">예) 일봉 근접 1.5%, 배수 3 → 알람 후 선에서 4.5% 이상 멀어졌다가 다시 1.5% 안으로 와야 또 울림. 낮추면 알람이 늘어납니다 (바이낸스 상위 100 기준 4h+일봉 하루 약 100건 @3배, 130건 @2배).</p>
+    {% for key, kind, period, label in ma_lines %}
+    {% set line = cfg.ma_alert.line(key) %}
+    <div class="tfblock">
+      <div class="check">
+        <input type="checkbox" id="ma_{{ key }}_enabled" name="ma_{{ key }}_enabled" {% if line.enabled %}checked{% endif %} />
+        <label for="ma_{{ key }}_enabled"><b>{{ label }}</b></label>
       </div>
-      <div></div>
-    </div>
-    <div class="check">
-      <input type="checkbox" id="ma20_tf_4h" name="ma20_tf_4h" {% if cfg.rules.ma20_approach.tf_4h.enabled %}checked{% endif %} />
-      <label for="ma20_tf_4h">4시간 봉</label>
-    </div>
-    <div class="row">
-      <div>
-        <label>4h 근접 % (이격 ≤ 이 값)</label>
-        <input type="number" step="any" name="ma20_prox_4h" value="{{ cfg.rules.ma20_approach.tf_4h.proximity_pct }}" required />
+      {% for tf in timeframes %}
+      {% set t = line.tf(tf) %}
+      <div class="tfgrid">
+        <div class="inline">
+          <input type="checkbox" id="ma_{{ key }}_{{ tf }}_enabled" name="ma_{{ key }}_{{ tf }}_enabled" {% if t.enabled %}checked{% endif %} />
+          <label for="ma_{{ key }}_{{ tf }}_enabled">{{ tf_label[tf] }}</label>
+        </div>
+        <div class="inline">
+          <label>±</label>
+          <input type="number" step="any" name="ma_{{ key }}_{{ tf }}_pct" value="{{ t.proximity_pct }}" required />
+          <label>%</label>
+        </div>
+        <div class="inline">
+          <input type="checkbox" id="ma_{{ key }}_{{ tf }}_above" name="ma_{{ key }}_{{ tf }}_above" {% if t.from_above %}checked{% endif %} />
+          <label for="ma_{{ key }}_{{ tf }}_above">위에서</label>
+          <input type="checkbox" id="ma_{{ key }}_{{ tf }}_below" name="ma_{{ key }}_{{ tf }}_below" {% if t.from_below %}checked{% endif %} />
+          <label for="ma_{{ key }}_{{ tf }}_below">아래에서</label>
+        </div>
       </div>
-      <div></div>
+      {% endfor %}
     </div>
-    <div class="check">
-      <input type="checkbox" id="ma20_tf_1d" name="ma20_tf_1d" {% if cfg.rules.ma20_approach.tf_1d.enabled %}checked{% endif %} />
-      <label for="ma20_tf_1d">1일 봉</label>
-    </div>
-    <div class="row">
-      <div>
-        <label>1d 근접 % (이격 ≤ 이 값)</label>
-        <input type="number" step="any" name="ma20_prox_1d" value="{{ cfg.rules.ma20_approach.tf_1d.proximity_pct }}" required />
-      </div>
-      <div></div>
-    </div>
-    <div class="row">
-      <div>
-        <label>폴링(초)</label>
-        <input type="number" step="any" name="ma20_poll_seconds" value="{{ cfg.rules.ma20_approach.poll_seconds }}" required />
-      </div>
-      <div>
-        <label>종목×봉 쿨다운(초)</label>
-        <input type="number" name="ma20_cooldown_seconds" value="{{ cfg.rules.ma20_approach.cooldown_seconds }}" required />
-      </div>
-    </div>
+    {% endfor %}
+    <p class="sub">권장 근접%: 4시간 1 · 일봉 1.5 · 주봉 3 · 월봉 5. 금리·환율처럼 덜 움직이는 자산은 같은 %도 넓게 작동합니다.</p>
   </div>
 
   <div class="actions">

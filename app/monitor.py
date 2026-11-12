@@ -3,36 +3,31 @@ from __future__ import annotations
 import signal
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 
 from rich.console import Console
 
-from app.absorption import FuturesAbsorptionBarWatcher
-from app.accumulation import FuturesAccumulationWatcher
-from app.aggregator import CandleAggregator
-from app.alerts import Notifier, RuleEngine, build_notifier
-from app.config import AppConfig, default_config_path, load_config, resolve_db_path
-from app.fetchers.market import LivePriceFetcher, OhlcvBackfiller
-from app.ma20_approach import FuturesMa20ApproachWatcher
-from app.models import AssetClass, WatchTarget
-from app.rsi_reclaim import FuturesRsiReclaimWatcher
+from app.alerts import Notifier, batch_messages, build_notifier
+from app.config import AppConfig, default_config_path, load_config
+from app.market import MarketData
+from app.series import Asset
 from app.settings import get_settings
-from app.storage import CandleStore
-from app.universe import BinanceUniverseService, resolve_watch_targets
-from app.volume_spike import FuturesVolumeSpikeWatcher
+from app.signals import AlertEngine, compute_snapshot, fmt_price
+from app.timeframes import TIMEFRAMES
 
 
 console = Console(force_terminal=True, soft_wrap=True)
 LogFn = Callable[[str], None]
-StatusFn = Callable[[dict[str, float], dict[str, float | None]], None]
+StatusFn = Callable[[list[str]], None]
 
 # config.yaml mtime 검사 주기 (저장 후 대략 이 시간 안에 반영)
 CONFIG_RELOAD_SECONDS = 5.0
+UNIVERSE_RETRY_SECONDS = 300.0
 
 
 class Monitor:
-    """상시 모니터: 유니버스 갱신 -> 봉 수집 -> 규칙 엔진 -> 알림."""
+    """바이낸스 선물 상위 N + 야후 큰 자산 → RSI / 이평 근접 알람 → 텔레그램."""
 
     def __init__(
         self,
@@ -45,63 +40,38 @@ class Monitor:
     ) -> None:
         self.config = config
         self._config_path = Path(config_path) if config_path else default_config_path()
-        self._config_mtime = self._file_mtime(self._config_path)
+        self._config_mtime = _file_mtime(self._config_path)
         self._last_config_check = 0.0
         self.settings = get_settings()
         self.notifier = notifier or build_notifier(self.settings)
         self.on_log = on_log
         self.on_status = on_status
         self.register_signals = register_signals
-        self.store = CandleStore(resolve_db_path(config), max_candles=config.history.max_candles)
-        self.engine = RuleEngine(
-            config=config,
-            cooldown_seconds=config.alert_cooldown_seconds,
-        )
-        self.price_fetcher = LivePriceFetcher(stock_min_interval=max(5.0, config.poll_interval_seconds))
-        self.backfiller = OhlcvBackfiller()
-        self.targets: list[WatchTarget] = []
-        self.aggregators: dict[str, CandleAggregator] = {}
-        self._stop = False
-        self._last_status = 0.0
-        self._last_crypto_sync = 0.0
-        self._crypto_rr = 0
-        self._latest_rsi: dict[str, float | None] = {}
-        self._latest_price: dict[str, float] = {}
-        self._armed = False
-        self._need = self._calc_need(config)
-        self._crypto_targets: list[WatchTarget] = []
-        self._binance_klines_targets: list[WatchTarget] = []
-        self._universe_svc = (
-            BinanceUniverseService(config.universe) if config.universe.enabled else None
-        )
-        self._volume_spike: FuturesVolumeSpikeWatcher | None = None
-        self._rsi_reclaim: FuturesRsiReclaimWatcher | None = None
-        self._accumulation: FuturesAccumulationWatcher | None = None
-        self._absorption: FuturesAbsorptionBarWatcher | None = None
-        self._ma20_approach: FuturesMa20ApproachWatcher | None = None
+        self.market = MarketData(log=self._log)
+        self.engine = AlertEngine()
+        self._stop = Event()
+        self._universe_due = 0.0
+        self._next_binance = 0.0
+        self._next_macro = 0.0
+        self._next_status = 0.0
+        self._alerts_total = 0
+        self._binance_stat = "-"
+        self._macro_stat = "-"
 
     def _log(self, message: str) -> None:
         if self.on_log is not None:
             self.on_log(message)
         else:
-            console.print(message)
+            console.print(message, markup=False, highlight=False)
 
     def request_stop(self, *_args) -> None:
-        self._stop = True
+        self._stop.set()
         self._log("종료 요청...")
 
-    def _apply_targets(self, targets: list[WatchTarget], backfill_new_only: bool = False) -> None:
-        old_keys = {t.key for t in self.targets}
-        self.targets = targets
-        self._crypto_targets = [t for t in targets if t.asset_class == AssetClass.CRYPTO]
-        self._binance_klines_targets = [t for t in targets if t.uses_binance_klines()]
-        for t in targets:
-            if t.key not in self.aggregators:
-                self.aggregators[t.key] = CandleAggregator(t.key, self.config.timeframe)
-        # 제거된 심볼 aggregator는 남겨둬도 무방 (메모리 소량)
-        new_targets = [t for t in targets if t.key not in old_keys] if backfill_new_only else targets
-        if new_targets:
-            self._backfill_targets(new_targets)
+    def _stopping(self) -> bool:
+        return self._stop.is_set()
+
+    # ---------- 실행 ----------
 
     def start(self) -> None:
         if self.register_signals:
@@ -111,463 +81,219 @@ class Monitor:
             except Exception:
                 pass
 
-        enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
-        if self.config.rules.volume_spike.enabled:
-            enabled.append("volume_spike")
-        if self.config.rules.rsi_macd_cross.enabled and self.config.rules.rsi_macd_cross.live:
-            enabled.append("rsi_reclaim")
-        if self.config.rules.accumulation.enabled:
-            enabled.append("alt_oi")
-        if self.config.rules.absorption_bar.enabled:
-            enabled.append("alt_absorption")
-        if self.config.rules.ma20_approach.enabled:
-            enabled.append("ma20_approach")
-        self._log(
-            f"모니터 시작 poll={self.config.poll_interval_seconds}s "
-            f"tf={self.config.timeframe} closed={self.config.signal_on_closed_bar}"
-        )
-        self._log(f"규칙: {', '.join(enabled) if enabled else '(없음)'}")
-        self._log(
-            f"RSI({self.config.rsi.period}) MACD({self.config.macd.fast},{self.config.macd.slow},{self.config.macd.signal}) "
-            f"BB({self.config.bollinger.period},{self.config.bollinger.stddev}) "
-            f"ATR SL={self.config.atr.sl_mult} TP={self.config.atr.tp_mult}"
-        )
-        if self.config.universe.enabled:
-            u = self.config.universe
-            self._log(
-                f"유니버스: Binance {u.quote_asset} / {u.volume_lookback_days}일 거래량 "
-                f"상위 {u.top_percentile}% (max {u.max_symbols})"
-            )
+        self._log_settings("모니터 시작")
+        self._log("Telegram 알림: ON" if self.notifier.enabled else "Telegram 알림: OFF (.env 확인)")
 
-        targets = resolve_watch_targets(self.config, log=self._log, force_universe=False)
-        self._apply_targets(targets, backfill_new_only=False)
-        self._log(f"심볼 {len(self.targets)}개 | DB={resolve_db_path(self.config)}")
-        self._log("Telegram 알림: ON" if self.settings.telegram_enabled else "Telegram 알림: OFF")
+        self._refresh_universe()
+        self._sync_macro_assets()
+        now = time.monotonic()
+        self._next_binance = now + self.config.poll_seconds
+        self._next_macro = now + self.config.macro.poll_seconds
+        self._next_status = now
+        self._log("기준값 기록 완료 - 이후 새로 진입하는 신호부터 알람")
 
-        self._armed = True
-        self._log("백필 완료 - 이후 새 봉 마감부터 알람 활성")
-
-        vs = self.config.rules.volume_spike
-        if vs.enabled:
-            self._volume_spike = FuturesVolumeSpikeWatcher(
-                cfg=vs,
-                notify=self.notifier.send,
-                log=self._log,
-            )
-            self._volume_spike.start()
-        else:
-            self._log("펌프 초입 알람: OFF")
-
-        rc = self.config.rules.rsi_macd_cross
-        if rc.enabled and rc.live:
-            self._rsi_reclaim = FuturesRsiReclaimWatcher(
-                cfg=rc,
-                rsi_period=self.config.rsi.period,
-                notify=self.notifier.send,
-                log=self._log,
-                global_poll=self.config.poll_interval_seconds,
-            )
-            self._rsi_reclaim.start()
-        else:
-            self._log("RSI 재돌파 알람: OFF")
-
-        acc = self.config.rules.accumulation
-        if acc.enabled:
-            self._accumulation = FuturesAccumulationWatcher(
-                cfg=acc,
-                notify=self.notifier.send,
-                log=self._log,
-            )
-            self._accumulation.start()
-        else:
-            self._log("알트 신호1 OI: OFF")
-
-        ab = self.config.rules.absorption_bar
-        if ab.enabled:
-            self._absorption = FuturesAbsorptionBarWatcher(
-                cfg=ab,
-                notify=self.notifier.send,
-                log=self._log,
-            )
-            self._absorption.start()
-        else:
-            self._log("알트 신호2 매집봉: OFF")
-
-        ma = self.config.rules.ma20_approach
-        if ma.enabled and ma.enabled_timeframes():
-            self._ma20_approach = FuturesMa20ApproachWatcher(
-                cfg=ma,
-                notify=self.notifier.send,
-                log=self._log,
-            )
-            self._ma20_approach.start()
-        else:
-            self._log("MA20 근접 알람: OFF")
-
-        while not self._stop:
-            loop_started = time.monotonic()
+        while not self._stopping():
             try:
                 self._maybe_reload_config()
-                self._maybe_refresh_universe()
-                self._tick()
+                now = time.monotonic()
+                if now >= self._universe_due:
+                    self._refresh_universe()
+                if self.market.binance_assets() and time.monotonic() >= self._next_binance:
+                    self._next_binance = time.monotonic() + self.config.poll_seconds
+                    self._binance_cycle()
+                if self.market.macro_assets() and time.monotonic() >= self._next_macro:
+                    self._next_macro = time.monotonic() + self.config.macro.poll_seconds
+                    self._macro_cycle()
+                self._emit_status()
             except Exception as exc:
-                self._log(f"tick error: {exc}")
-
-            elapsed = time.monotonic() - loop_started
-            sleep_for = self.config.poll_interval_seconds - elapsed
-            if sleep_for > 0:
-                end = time.monotonic() + sleep_for
-                while not self._stop and time.monotonic() < end:
-                    # 대기 중에도 config 변경을 빨리 감지
-                    self._maybe_reload_config()
-                    time.sleep(min(0.2, end - time.monotonic()))
+                self._log(f"루프 오류: {exc}")
+            self._stop.wait(1.0)
 
         self._shutdown()
 
-    @staticmethod
-    def _file_mtime(path: Path) -> float | None:
-        try:
-            return path.stat().st_mtime
-        except OSError:
-            return None
-
-    @staticmethod
-    def _calc_need(config: AppConfig) -> int:
-        return max(
-            config.history.max_candles,
-            config.macd.slow + config.macd.signal + 50,
-            config.bollinger.period + 50,
-            config.atr.period + 50,
+    def _binance_cycle(self) -> None:
+        started = time.monotonic()
+        ok, total = self.market.refresh_binance(self._stopping)
+        sent = self._evaluate(self.market.binance_assets())
+        self._binance_stat = (
+            f"{len(self.market.binance_assets())}종목 갱신 {ok}/{total} "
+            f"{time.monotonic() - started:.1f}s 알람 {sent}"
         )
+        if ok < total * 0.8:
+            self._log(f"바이낸스 갱신 일부 실패: {ok}/{total}")
+
+    def _macro_cycle(self) -> None:
+        started = time.monotonic()
+        ok, total = self.market.refresh_macro()
+        sent = self._evaluate(self.market.macro_assets())
+        self._macro_stat = (
+            f"{len(self.market.macro_assets())}종목 갱신 {ok}/{total} "
+            f"{time.monotonic() - started:.1f}s 알람 {sent}"
+        )
+        if ok < total * 0.5:
+            self._log(f"야후 갱신 일부 실패: {ok}/{total}")
+
+    def _evaluate(self, assets: list[Asset]) -> int:
+        messages: list[str] = []
+        for a in assets:
+            for tf in TIMEFRAMES:
+                bars = self.market.bars(a, tf)
+                if not bars:
+                    continue
+                try:
+                    messages.extend(self.engine.evaluate(a, tf, bars, self.config))
+                except Exception as exc:
+                    self._log(f"평가 오류 {a.symbol} {tf}: {exc}")
+        for m in messages:
+            self._log("알람 | " + m.replace("\n", " | "))
+        for chunk in batch_messages(messages):
+            try:
+                self.notifier.send(chunk)
+            except Exception as exc:
+                self._log(f"텔레그램 전송 실패: {exc}")
+        self._alerts_total += len(messages)
+        return len(messages)
+
+    # ---------- 유니버스 / 야후 목록 ----------
+
+    def _refresh_universe(self) -> None:
+        u = self.config.universe
+        if not u.enabled:
+            self._apply_universe([])
+            self._universe_due = float("inf")
+            return
+        try:
+            symbols = self.market.binance.top_symbols(u.top_n, u.include_tradfi, u.exclude_bases)
+        except Exception as exc:
+            self._log(f"바이낸스 상위 종목 조회 실패 ({UNIVERSE_RETRY_SECONDS:.0f}초 후 재시도): {exc}")
+            self._universe_due = time.monotonic() + UNIVERSE_RETRY_SECONDS
+            return
+        self._apply_universe(symbols)
+        self._universe_due = time.monotonic() + u.refresh_hours * 3600.0
+
+    def _apply_universe(self, symbols) -> None:
+        added, removed = self.market.set_binance_universe(symbols)
+        for a in removed:
+            self.engine.forget(a.key)
+        if added or removed:
+            self._log(
+                f"바이낸스 대상 {len(self.market.binance_assets())}종목 "
+                f"(+{len(added)} / -{len(removed)})"
+            )
+        if added:
+            self.market.bootstrap_binance(added, self._stopping)
+            self._evaluate(added)
+
+    def _sync_macro_assets(self) -> None:
+        m = self.config.macro
+        added, removed = self.market.set_macro_assets(m.assets if m.enabled else [])
+        for a in removed:
+            self.engine.forget(a.key)
+        if added or removed:
+            self._log(
+                f"야후 대상 {len(self.market.macro_assets())}종목 "
+                f"(+{len(added)} / -{len(removed)})"
+            )
+        if added:
+            self.market.bootstrap_macro(added)
+            self._evaluate(added)
+
+    # ---------- 설정 자동 반영 ----------
 
     def _maybe_reload_config(self) -> None:
         now = time.monotonic()
         if now - self._last_config_check < CONFIG_RELOAD_SECONDS:
             return
         self._last_config_check = now
-        mtime = self._file_mtime(self._config_path)
+        mtime = _file_mtime(self._config_path)
         if mtime is None or mtime == self._config_mtime:
             return
+        self._config_mtime = mtime
         try:
             new_cfg = load_config(self._config_path)
         except Exception as exc:
             self._log(f"config reload 실패(기존 유지): {exc}")
-            self._config_mtime = mtime
             return
-        self._apply_reloaded_config(new_cfg)
-        self._config_mtime = mtime
-
-    def _apply_reloaded_config(self, new_cfg: AppConfig) -> None:
         old = self.config
-        tf_changed = old.timeframe != new_cfg.timeframe
-        universe_changed = (
-            old.universe.model_dump() != new_cfg.universe.model_dump()
-            or old.crypto != new_cfg.crypto
-            or old.us_stocks != new_cfg.us_stocks
-            or old.kr_stocks != new_cfg.kr_stocks
-        )
-
         self.config = new_cfg
-        self.engine.config = new_cfg
-        self.engine.cooldown_seconds = new_cfg.alert_cooldown_seconds
-        self._need = self._calc_need(new_cfg)
-        self.price_fetcher._stock_min_interval = max(5.0, new_cfg.poll_interval_seconds)
-        self.store.max_candles = new_cfg.history.max_candles
+        self._log_settings("config 반영")
+        if old.universe.model_dump() != new_cfg.universe.model_dump():
+            self._universe_due = 0.0
+        if old.macro.model_dump() != new_cfg.macro.model_dump():
+            self._sync_macro_assets()
+        now = time.monotonic()
+        self._next_binance = min(self._next_binance, now + new_cfg.poll_seconds)
+        self._next_macro = min(self._next_macro, now + new_cfg.macro.poll_seconds)
 
-        if self._universe_svc is not None:
-            self._universe_svc.cfg = new_cfg.universe
-        elif new_cfg.universe.enabled:
-            self._universe_svc = BinanceUniverseService(new_cfg.universe)
-
-        self._sync_volume_spike(new_cfg)
-        self._sync_rsi_reclaim(new_cfg)
-        self._sync_accumulation(new_cfg)
-        self._sync_absorption(new_cfg)
-        self._sync_ma20_approach(new_cfg)
-
-        if tf_changed:
-            self._log(f"timeframe 변경 {old.timeframe} → {new_cfg.timeframe}, 봉 재집계")
-            self.aggregators = {
-                t.key: CandleAggregator(t.key, new_cfg.timeframe) for t in self.targets
-            }
-            if self.targets:
-                self._backfill_targets(self.targets)
-
-        if universe_changed:
-            self._log("유니버스/심볼 설정 변경 → 목록 재계산")
-            try:
-                new_targets = resolve_watch_targets(
-                    self.config, log=self._log, force_universe=True
-                )
-                self._apply_targets(new_targets, backfill_new_only=True)
-            except Exception as exc:
-                self._log(f"심볼 목록 갱신 실패(기존 유지): {exc}")
-
-        enabled = [r.id for r in self.engine.rules if r.enabled(self.config)]
-        if self.config.rules.volume_spike.enabled:
-            enabled.append("volume_spike")
-        if self.config.rules.rsi_macd_cross.enabled and self.config.rules.rsi_macd_cross.live:
-            enabled.append("rsi_reclaim")
-        if self.config.rules.accumulation.enabled:
-            enabled.append("alt_oi")
-        if self.config.rules.absorption_bar.enabled:
-            enabled.append("alt_absorption")
-        if self.config.rules.ma20_approach.enabled:
-            enabled.append("ma20_approach")
-        self._log(
-            f"config 반영 poll={new_cfg.poll_interval_seconds}s tf={new_cfg.timeframe} "
-            f"규칙={', '.join(enabled) if enabled else '(없음)'}"
-        )
-
-    def _sync_volume_spike(self, cfg: AppConfig) -> None:
-        vs = cfg.rules.volume_spike
-        if vs.enabled:
-            if self._volume_spike is None:
-                self._volume_spike = FuturesVolumeSpikeWatcher(
-                    cfg=vs,
-                    notify=self.notifier.send,
-                    log=self._log,
-                )
-                self._volume_spike.start()
-                return
-            self._volume_spike.apply_config(vs)
-            return
-        if self._volume_spike is not None:
-            self._volume_spike.stop()
-            self._volume_spike = None
-            self._log("펌프 초입 알람: OFF (config)")
-
-    def _sync_rsi_reclaim(self, cfg: AppConfig) -> None:
-        rc = cfg.rules.rsi_macd_cross
-        want = rc.enabled and rc.live
-        if want:
-            if self._rsi_reclaim is None:
-                self._rsi_reclaim = FuturesRsiReclaimWatcher(
-                    cfg=rc,
-                    rsi_period=cfg.rsi.period,
-                    notify=self.notifier.send,
-                    log=self._log,
-                    global_poll=cfg.poll_interval_seconds,
-                )
-                self._rsi_reclaim.start()
-                return
-            need_restart = self._rsi_reclaim.apply_config(
-                rc, rsi_period=cfg.rsi.period, global_poll=cfg.poll_interval_seconds
-            )
-            if need_restart:
-                self._rsi_reclaim.stop()
-                self._rsi_reclaim = FuturesRsiReclaimWatcher(
-                    cfg=rc,
-                    rsi_period=cfg.rsi.period,
-                    notify=self.notifier.send,
-                    log=self._log,
-                    global_poll=cfg.poll_interval_seconds,
-                )
-                self._rsi_reclaim.start()
-                self._log(f"RSI 재돌파 timeframe → {rc.timeframe}, 워처 재시작")
-            return
-        if self._rsi_reclaim is not None:
-            self._rsi_reclaim.stop()
-            self._rsi_reclaim = None
-            self._log("RSI 재돌파 알람: OFF (config)")
-
-    def _sync_accumulation(self, cfg: AppConfig) -> None:
-        acc = cfg.rules.accumulation
-        if acc.enabled:
-            if self._accumulation is None:
-                self._accumulation = FuturesAccumulationWatcher(
-                    cfg=acc,
-                    notify=self.notifier.send,
-                    log=self._log,
-                )
-                self._accumulation.start()
-                return
-            self._accumulation.apply_config(acc)
-            return
-        if self._accumulation is not None:
-            self._accumulation.stop()
-            self._accumulation = None
-            self._log("알트 신호1 OI: OFF (config)")
-
-    def _sync_absorption(self, cfg: AppConfig) -> None:
-        ab = cfg.rules.absorption_bar
-        if ab.enabled:
-            if self._absorption is None:
-                self._absorption = FuturesAbsorptionBarWatcher(
-                    cfg=ab,
-                    notify=self.notifier.send,
-                    log=self._log,
-                )
-                self._absorption.start()
-                return
-            self._absorption.apply_config(ab)
-            return
-        if self._absorption is not None:
-            self._absorption.stop()
-            self._absorption = None
-            self._log("알트 신호2 매집봉: OFF (config)")
-
-    def _sync_ma20_approach(self, cfg: AppConfig) -> None:
-        ma = cfg.rules.ma20_approach
-        want = ma.enabled and bool(ma.enabled_timeframes())
-        if want:
-            if self._ma20_approach is None:
-                self._ma20_approach = FuturesMa20ApproachWatcher(
-                    cfg=ma,
-                    notify=self.notifier.send,
-                    log=self._log,
-                )
-                self._ma20_approach.start()
-                return
-            self._ma20_approach.apply_config(ma)
-            return
-        if self._ma20_approach is not None:
-            self._ma20_approach.stop()
-            self._ma20_approach = None
-            self._log("MA20 근접 알람: OFF (config)")
-
-    def _maybe_refresh_universe(self) -> None:
-        if not self._universe_svc or not self._universe_svc.needs_refresh():
-            return
-        self._log("유니버스 일일 갱신 시작...")
-        try:
-            new_targets = resolve_watch_targets(self.config, log=self._log, force_universe=True)
-            self._apply_targets(new_targets, backfill_new_only=True)
-            self._log(f"유니버스 갱신 완료: {len(self.targets)}개")
-        except Exception as exc:
-            self._log(f"유니버스 갱신 실패(기존 목록 유지): {exc}")
-
-    def _emit_events(self, events) -> None:
-        for ev in events:
-            self.notifier.send(ev.message())
-            self._log(ev.message().replace("\n", " | "))
-
-    def _evaluate_target(self, t: WatchTarget, allow_alert: bool) -> None:
-        candles = self.store.get_candles(t.key, self.config.timeframe)
-        ctx, events = self.engine.evaluate_candles(t, candles, allow_alert=allow_alert and self._armed)
-        if ctx is not None:
-            self._latest_price[t.key] = ctx.last_close()
-            self._latest_rsi[t.key] = ctx.rsi[ctx.i]
-        if events:
-            self._emit_events(events)
-
-    def _backfill_targets(self, targets: list[WatchTarget]) -> None:
-        for t in targets:
-            if self._stop:
-                return
-            try:
-                candles = self.backfiller.backfill(t, self.config.timeframe, self._need)
-                if candles:
-                    self.store.upsert_many(candles)
-                    self.aggregators[t.key].load(candles[-1])
-                    self._evaluate_target(t, allow_alert=False)
-                    self._log(
-                        f"backfill OK {t.name}: {len(candles)} candles, "
-                        f"RSI={_fmt_rsi(self._latest_rsi.get(t.key))}"
-                    )
-                else:
-                    self._log(f"backfill empty {t.name}")
-            except Exception as exc:
-                self._log(f"backfill fail {t.name}: {exc}")
-        self._emit_status(force=True)
-
-    def _resync_binance_klines(self) -> None:
-        if not self._binance_klines_targets:
-            return
-        batch = 8
-        sync_limit = min(self._need, 120)
-        n = len(self._binance_klines_targets)
-        for i in range(min(batch, n)):
-            t = self._binance_klines_targets[(self._crypto_rr + i) % n]
-            try:
-                candles = self.backfiller.backfill(t, self.config.timeframe, sync_limit)
-                if not candles:
-                    continue
-                self.store.upsert_many(candles)
-                self.aggregators[t.key].load(candles[-1])
-                self._evaluate_target(t, allow_alert=True)
-            except Exception as exc:
-                self._log(f"binance sync fail {t.name}: {exc}")
-        self._crypto_rr = (self._crypto_rr + batch) % max(n, 1)
-
-    def _tick(self) -> None:
-        now_m = time.monotonic()
-        sync_every = max(5.0, float(self.config.poll_interval_seconds))
-        if now_m - self._last_crypto_sync >= sync_every:
-            self._resync_binance_klines()
-            self._last_crypto_sync = now_m
-
-        prices = self.price_fetcher.fetch_prices(self.targets)
-        now = datetime.now(timezone.utc).timestamp()
-
-        for t in self.targets:
-            price = prices.get(t.key)
-            if price is None:
+    def _log_settings(self, prefix: str) -> None:
+        c = self.config
+        u = c.universe
+        rsi_parts = []
+        for tf in TIMEFRAMES:
+            t = c.rsi_alert.tf(tf)
+            if not t.enabled:
                 continue
-            # 바이낸스/주식 모두 실시간 가격으로 형성 중 봉 갱신 → 라이브 RSI 돌파 가능
-            updated = self.aggregators[t.key].update(price, now)
-            self.store.upsert_many(updated)
-            self._evaluate_target(t, allow_alert=True)
+            ob = f"{t.overbought:g}" if t.overbought_enabled else "-"
+            os_ = f"{t.oversold:g}" if t.oversold_enabled else "-"
+            rsi_parts.append(f"{tf} {ob}/{os_}")
+        ma_parts = []
+        for key in ("ema50", "ema200", "vwma100"):
+            line = c.ma_alert.line(key)
+            if not line.enabled:
+                continue
+            tfs = [f"{tf}±{line.tf(tf).proximity_pct:g}%" for tf in TIMEFRAMES if line.tf(tf).enabled]
+            if tfs:
+                ma_parts.append(f"{key}[{' '.join(tfs)}]")
+        self._log(
+            f"{prefix}: 바이낸스 {'상위 ' + str(u.top_n) if u.enabled else 'OFF'}"
+            f"{' (주식/원자재 포함)' if u.enabled and u.include_tradfi else ''} 갱신 {c.poll_seconds:g}s | "
+            f"야후 {len(c.macro.assets) if c.macro.enabled else 'OFF'} 갱신 {c.macro.poll_seconds:g}s"
+        )
+        self._log(f"  RSI({c.rsi_alert.period}) {'ON' if c.rsi_alert.enabled else 'OFF'}: {', '.join(rsi_parts) or '-'}")
+        self._log(f"  이평 근접 {'ON' if c.ma_alert.enabled else 'OFF'}: {' '.join(ma_parts) or '-'}")
 
-        self._emit_status()
+    # ---------- 상태 ----------
 
-    def _emit_status(self, force: bool = False) -> None:
+    def _emit_status(self) -> None:
         interval = self.config.status_log_seconds
         now = time.monotonic()
-        if not force and interval > 0 and (now - self._last_status) < interval:
+        if now < self._next_status:
             return
-        self._last_status = now
-
+        self._next_status = now + (interval if interval > 0 else 60.0)
+        if interval > 0:
+            self._log(
+                f"상태 | 바이낸스 {self._binance_stat} | 야후 {self._macro_stat} | 누적 알람 {self._alerts_total}"
+            )
         if self.on_status is not None:
-            self.on_status(dict(self._latest_price), dict(self._latest_rsi))
+            self.on_status(self.status_lines())
 
-        ts = datetime.now().strftime("%H:%M:%S")
-        parts = []
-        for t in self.targets:
-            p = self._latest_price.get(t.key)
-            r = self._latest_rsi.get(t.key)
-            if p is None:
-                continue
-            parts.append(f"{t.symbol}={_fmt_price(p)} RSI={_fmt_rsi(r)}")
-        if parts:
-            shown = parts[:12]
-            more = f" ...(+{len(parts)-12})" if len(parts) > 12 else ""
-            self._log(f"{ts} " + " | ".join(shown) + more)
+    def status_lines(self, limit: int = 40) -> list[str]:
+        lines = []
+        for a in (self.market.macro_assets() + self.market.binance_assets())[:limit]:
+            parts = []
+            price = None
+            for tf in TIMEFRAMES:
+                snap = compute_snapshot(self.market.bars(a, tf), self.config.rsi_alert.period)
+                if snap is None:
+                    parts.append(f"{tf} -")
+                    continue
+                price = snap.price
+                parts.append(f"{tf} {snap.rsi:.0f}" if snap.rsi is not None else f"{tf} -")
+            px = fmt_price(price) if price is not None else "-"
+            lines.append(f"{a.symbol:<14} {px:>14}  RSI " + " ".join(parts))
+        return lines
 
     def _shutdown(self) -> None:
-        if self._volume_spike:
-            self._volume_spike.stop()
-            self._volume_spike = None
-        if self._rsi_reclaim:
-            self._rsi_reclaim.stop()
-            self._rsi_reclaim = None
-        if self._accumulation:
-            self._accumulation.stop()
-            self._accumulation = None
-        if self._absorption:
-            self._absorption.stop()
-            self._absorption = None
-        if self._ma20_approach:
-            self._ma20_approach.stop()
-            self._ma20_approach = None
-        self.price_fetcher.close()
-        self.backfiller.close()
-        if self._universe_svc:
-            self._universe_svc.close()
-        self.store.close()
-        close = getattr(self.notifier, "close", None)
-        if callable(close):
-            close()
+        self.market.close()
+        try:
+            self.notifier.close()
+        except Exception:
+            pass
         self._log("모니터 종료")
 
 
-def _fmt_rsi(value: float | None) -> str:
-    return f"{value:.1f}" if value is not None else "n/a"
-
-
-def _fmt_price(price: float) -> str:
-    if abs(price) >= 1000:
-        return f"{price:,.2f}"
-    if abs(price) >= 1:
-        return f"{price:,.4f}"
-    return f"{price:.6f}"
+def _file_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None

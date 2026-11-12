@@ -1,198 +1,164 @@
-# stock-monitor config
-# timeframe: 1m | 3m | 5m | 15m | 30m | 1h | 4h | 1d
-# 알람은 signal_on_closed_bar=true 일 때 봉 마감 기준
-
-# --- 감시 유니버스 (바이낸스) ---
-# 바이낸스에는 일반 주식/ETF가 거의 없고, 현물 USDT 코인 페어가 대상입니다.
-# 최근 N일 거래대금 상위 top_percentile% 를 매일 갱신해 4가지 규칙을 적용합니다.
-# include_static_stocks=true 이면 아래 us/kr 고정 종목도 함께 감시합니다.
+# stock-monitor config (웹 설정 페이지에서 저장하면 이 파일이 다시 쓰입니다)
+# 타임프레임: tf_4h=4시간봉, tf_1d=일봉, tf_1w=주봉, tf_1mo=월봉
+# 알람 1 rsi_alert: RSI 과매수 상향 돌파 / 과매도 하향 돌파 (형성 중 봉, 봉당 1회)
+# 알람 2 ma_alert: EMA50 / EMA200 / VWMA100 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)
+poll_seconds: 60.0
+status_log_seconds: 600.0
 universe:
   enabled: true
-  source: binance_spot
-  quote_asset: USDT
-  volume_lookback_days: 7
-  top_percentile: 30        # 부하 크면 15 로 낮추세요
-  max_symbols: 60           # EC2 t3.micro 안전 상한 (필요시 조절)
-  refresh_hours: 24
-  exclude_leveraged: true
-  exclude_stablecoins: true
-  include_static_stocks: true
-
-# universe 모드에서는 crypto는 비워 두고, 주식/ETF는 binance_futures로 추가 (Yahoo 불필요)
-crypto: []
-kr_stocks: []
-us_stocks:
-  - ticker: SKHY
-    name: SK Hynix ADR
-    binance_futures: SKHYUSDT
-  - ticker: SPCX
-    name: SpaceX
-    binance_futures: SPCXUSDT
-  - ticker: SOXL
-    name: SOXL Semiconductor Bull 3X
-    binance_futures: SOXLUSDT
-  - ticker: CRWV
-    name: CoreWeave
-    binance_futures: CRWVUSDT
-  - ticker: SNDK
-    name: SanDisk
-    binance_futures: SNDKUSDT
-
-poll_interval_seconds: 60.0
-timeframe: 4h
-signal_on_closed_bar: true
-
-rsi:
+  top_n: 100
+  include_tradfi: true
+  refresh_hours: 24.0
+  exclude_bases:
+  - USDC
+  - FDUSD
+  - TUSD
+  - BUSD
+  - USDP
+  - DAI
+  - USDE
+  - USD1
+  - PYUSD
+  - BFUSD
+  - XUSD
+macro:
+  enabled: true
+  poll_seconds: 300.0
+  assets:
+  - ticker: NQ=F
+    name: 나스닥100 선물
+  - ticker: ES=F
+    name: S&P500 선물
+  - ticker: RTY=F
+    name: 러셀2000 선물
+  - ticker: SOXX
+    name: SOXX 반도체 ETF
+  - ticker: GC=F
+    name: 금 선물
+  - ticker: SI=F
+    name: 은 선물
+  - ticker: PL=F
+    name: 백금 선물
+  - ticker: HG=F
+    name: 구리 선물
+  - ticker: CL=F
+    name: WTI 원유
+  - ticker: BZ=F
+    name: 브렌트유
+  - ticker: NG=F
+    name: 천연가스
+  - ticker: DX-Y.NYB
+    name: 달러인덱스
+  - ticker: ^TNX
+    name: 미 10년물 금리
+  - ticker: TLT
+    name: TLT 미 장기채 ETF
+  - ticker: ^VIX
+    name: VIX
+  - ticker: JPY=X
+    name: 달러/엔
+  - ticker: KRW=X
+    name: 달러/원
+  - ticker: ^KS11
+    name: 코스피
+  - ticker: ^N225
+    name: 니케이225
+  - ticker: ^HSI
+    name: 항셍
+rsi_alert:
+  enabled: true
   period: 14
-
-macd:
-  fast: 12
-  slow: 26
-  signal: 9
-
-bollinger:
-  period: 20
-  stddev: 2.0
-
-atr:
-  period: 14
-  sl_mult: 1.5
-  tp_mult: 3.0
-
-# 알람 규칙 on/off: enabled true/false
-# 1) extreme_rsi     — RSI 과매수/과매도
-# 2) rsi_macd_cross  — RSI 하강(oversold) 후 재돌파(reclaim) (전종목·형성중봉)
-# 3) divergence      — 상/하강 다이버전스
-# 4) bb_squeeze      — 볼린저 스퀴즈 밴드
-# 5) volume_spike    — 잡코인 펌프 초입 (형성중봉·가격급등∧거래량∧횡보∧메이저제외)
-# 6) accumulation    — 알트코인 신호 1 OI 변동
-# 8) ma20_approach   — MA20 위에서 아래로 근접 (1h/4h/1d 개별)
-rules:
-  extreme_rsi:
+  rearm_gap: 5.0
+  tf_4h:
     enabled: true
-    high: 83.0
-    low: 23.0
-    live: true            # 형성 중 4h봉에서도 RSI 돌파 즉시 알람
-  rsi_macd_cross:
+    overbought_enabled: true
+    overbought: 75.0
+    oversold_enabled: true
+    oversold: 25.0
+  tf_1d:
     enabled: true
-    live: true
-    timeframe: 15m          # 대상봉
-    oversold: 30.0          # 이 값 이하로 내려가야 무장
-    reclaim: 30.0           # 무장 후 이 값 이상 상향 돌파 시 알람 (예: 35면 더 확실히 돌파)
+    overbought_enabled: true
     overbought: 70.0
-    follow_global_poll: true  # 가격 갱신 = 공통 폴링 간격
-    poll_seconds: 60          # follow_global_poll=false 일 때만
-    cooldown_seconds: 900   # 종목당 15분
-  divergence:
-    enabled: false
+    oversold_enabled: true
     oversold: 30.0
+  tf_1w:
+    enabled: true
+    overbought_enabled: true
     overbought: 70.0
-    lookback: 60
-    pivot_left: 3
-    pivot_right: 3
-    use_rsi: true
-    use_macd: true
-  bb_squeeze:
-    enabled: false
-    squeeze_ratio: 0.05
-  volume_spike:
+    oversold_enabled: true
+    oversold: 30.0
+  tf_1mo:
     enabled: true
-    timeframe: 3m
-    window_bars: 5          # 최근 15분 가격
-    min_price_pct: 10       # +10% 이상 (형성 중 봉 포함)
-    volume_lookback: 20
-    volume_mult: 4.0        # 최신봉 거래량 ≥ 평균×4
-    quiet_bars: 40          # 직전 ~2시간 횡보
-    quiet_range_pct: 10     # 그 구간 고저 < 10%
-    poll_seconds: 30          # 형성중 봉 감시 주기
-    cooldown_seconds: 600   # 심볼당 10분
-    max_workers: 15
-    symbol_refresh_hours: 24
-    exclude_bases:
-      - BTC
-      - ETH
-      - BNB
-      - SOL
-      - XRP
-      - DOGE
-      - ADA
-      - AVAX
-      - LINK
-      - DOT
-      - TRX
-      - LTC
-      - BCH
-      - NEAR
-      - SUI
-      - PEPE
-      - WLD
-      - UNI
-      - AAVE
-      - FIL
-      - TON
-      - SHIB
-      - APT
-      - ARB
-      - OP
-      - ATOM
-      - ICP
-      - HYPE
-      - USDC
-      - FDUSD
-      - TUSD
-      - DAI
-      - USDE
-  accumulation:
+    overbought_enabled: true
+    overbought: 70.0
+    oversold_enabled: true
+    oversold: 30.0
+ma_alert:
+  enabled: true
+  rearm_mult: 3.0
+  ema50:
     enabled: true
-    range_days: 14
-    range_pct: 38           # 게이트: 이미 수직 펌프인 차트 제외
-    tight_range_pct: 26     # 신호: 타이트 박스
-    oi_days: 7
-    oi_change_pct: 15       # 7일 달러 OI
-    min_oi_usdt: 1500000
-    trend_days: 7
-    trend_min_pct: -30
-    trend_max_pct: 22
-    vol_mult: 1.4           # 최근 3일 거래량 / 직전 10일 평균
-    btc_rs_pct: 4.5         # 7일 수익률이 BTC보다 이만큼 강함
-    poll_seconds: 3600
-    cooldown_seconds: 86400   # 종목당 24시간
-    max_workers: 8
-    symbol_refresh_hours: 24
-  absorption_bar:
-    enabled: true
-    timeframe: 4h           # 형성 중 봉 포함
-    wick_ratio: 0.62        # 윗꼬리 / 고저
-    max_body_ratio: 0.25    # 몸통 / 고저
-    max_close_pct: 2.5      # 전봉 대비 종가 변화
-    min_range_pct: 1.8      # 너무 작은 봉 제외
-    volume_lookback: 20
-    volume_mult: 3.5
-    poll_seconds: 60
-    cooldown_seconds: 28800 # 종목당 8시간
-    max_workers: 10
-    symbol_refresh_hours: 24
-  ma20_approach:
-    enabled: true
-    period: 20
-    # 이격% = (가격-MA)/MA*100. MA 위에서 이 값 이내로 좁혀질 때 알람
-    # 권장: 1h 0.5 / 4h 1.0 / 1d 1.5 (너무 작으면 노이즈, 크면 늦은 신호)
-    tf_1h:
-      enabled: true
-      proximity_pct: 0.5
     tf_4h:
       enabled: true
       proximity_pct: 1.0
+      from_above: true
+      from_below: true
     tf_1d:
       enabled: true
       proximity_pct: 1.5
-    poll_seconds: 60
-    cooldown_seconds: 14400  # 종목×타임프레임당 4시간
-    max_workers: 10
-    symbol_refresh_hours: 24
-
-alert_cooldown_seconds: 3600
-history:
-  max_candles: 300
-  db_path: data/candles.db
-status_log_seconds: 15.0
+      from_above: true
+      from_below: true
+    tf_1w:
+      enabled: true
+      proximity_pct: 3.0
+      from_above: true
+      from_below: true
+    tf_1mo:
+      enabled: true
+      proximity_pct: 5.0
+      from_above: true
+      from_below: true
+  ema200:
+    enabled: true
+    tf_4h:
+      enabled: true
+      proximity_pct: 1.0
+      from_above: true
+      from_below: true
+    tf_1d:
+      enabled: true
+      proximity_pct: 1.5
+      from_above: true
+      from_below: true
+    tf_1w:
+      enabled: true
+      proximity_pct: 3.0
+      from_above: true
+      from_below: true
+    tf_1mo:
+      enabled: true
+      proximity_pct: 5.0
+      from_above: true
+      from_below: true
+  vwma100:
+    enabled: true
+    tf_4h:
+      enabled: true
+      proximity_pct: 1.0
+      from_above: true
+      from_below: true
+    tf_1d:
+      enabled: true
+      proximity_pct: 1.5
+      from_above: true
+      from_below: true
+    tf_1w:
+      enabled: true
+      proximity_pct: 3.0
+      from_above: true
+      from_below: true
+    tf_1mo:
+      enabled: true
+      proximity_pct: 5.0
+      from_above: true
+      from_below: true

@@ -6,11 +6,15 @@ __pycache__/
 venv/
 .env
 
+# SSH 키
+*.pem
+
 # Runtime data / caches (커밋하지 않음)
 data/*
 !data/.gitkeep
 *.db
 universe.json
+config.yaml.bak
 
 # IDE / OS
 .idea/

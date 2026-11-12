@@ -47,8 +47,29 @@
       color: var(--text);
       margin-bottom: 12px;
     }
+    textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--input);
+      font: .95rem/1.5 ui-monospace, Consolas, monospace;
+      color: var(--text);
+      margin-bottom: 12px;
+      resize: vertical;
+    }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+    .tfblock { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+    .tfgrid {
+      display: grid; grid-template-columns: 110px 150px 1fr; gap: 10px;
+      align-items: center; padding: 4px 0;
+    }
+    @media (max-width: 560px) { .tfgrid { grid-template-columns: 1fr 1fr; } .tfgrid > :last-child { grid-column: 1 / -1; } }
+    .inline { display: flex; align-items: center; gap: 6px; }
+    .inline input[type=number] { margin: 0; padding: 8px 10px; }
+    .inline input[type=checkbox] { width: 20px; height: 20px; margin: 0; flex: none; }
+    .inline label { margin: 0; color: var(--text); font-size: .95rem; white-space: nowrap; }
     .check {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 0; margin-bottom: 4px;

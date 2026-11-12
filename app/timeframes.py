@@ -1,60 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+# 알람 타임프레임. 설정 키는 tf_<id> (예: tf_4h, tf_1mo)
+TIMEFRAMES: tuple[str, ...] = ("4h", "1d", "1w", "1mo")
 
-TIMEFRAME_SECONDS: dict[str, int] = {
-    "1m": 60,
-    "3m": 180,
-    "5m": 300,
-    "15m": 900,
-    "30m": 1800,
-    "1h": 3600,
-    "4h": 14400,
-    "1d": 86400,
+TF_LABEL: dict[str, str] = {
+    "4h": "4시간봉",
+    "1d": "일봉",
+    "1w": "주봉",
+    "1mo": "월봉",
 }
 
-# yfinance interval 매핑
-YFINANCE_INTERVAL: dict[str, str] = {
-    "1m": "1m",
-    "3m": "5m",  # yfinance에 3m 없음 -> 5m으로 근사 백필
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "60m",
-    "4h": "60m",
-    "1d": "1d",
-}
-
-# Binance interval 매핑
 BINANCE_INTERVAL: dict[str, str] = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "1h",
     "4h": "4h",
     "1d": "1d",
+    "1w": "1w",
+    "1mo": "1M",
 }
 
-
-def timeframe_seconds(timeframe: str) -> int:
-    if timeframe not in TIMEFRAME_SECONDS:
-        raise ValueError(f"Unsupported timeframe: {timeframe}")
-    return TIMEFRAME_SECONDS[timeframe]
-
-
-def floor_open_time(ts: datetime | float | int, timeframe: str) -> int:
-    """시각을 봉 시작 epoch(초)로 floor."""
-    if isinstance(ts, datetime):
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        epoch = int(ts.timestamp())
-    else:
-        epoch = int(ts)
-    step = timeframe_seconds(timeframe)
-    return epoch - (epoch % step)
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+# 4h는 야후에 없어서 1h를 세션 기준 4개씩 묶어 만든다
+YAHOO_INTERVAL: dict[str, str] = {
+    "4h": "1h",
+    "1d": "1d",
+    "1w": "1wk",
+    "1mo": "1mo",
+}

@@ -11,9 +11,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import AppConfig, default_config_path, load_config, save_config
+from app.config import MA_LINES, AppConfig, default_config_path, load_config, save_config
 from app.settings import get_settings
-from app.timeframes import TIMEFRAME_SECONDS
+from app.timeframes import TF_LABEL, TIMEFRAMES
 
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -88,7 +88,11 @@ def create_app() -> FastAPI:
             "config.html",
             {
                 "cfg": cfg,
-                "timeframes": list(TIMEFRAME_SECONDS.keys()),
+                "timeframes": TIMEFRAMES,
+                "tf_label": TF_LABEL,
+                "ma_lines": MA_LINES,
+                "macro_text": "\n".join(f"{a.ticker}, {a.name}" for a in cfg.macro.assets),
+                "exclude_text": ", ".join(cfg.universe.exclude_bases),
                 "msg": msg,
                 "err": err,
                 "status": _service_status(),
@@ -96,142 +100,12 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/config")
-    async def save(
-        request: Request,
-        poll_interval_seconds: float = Form(...),
-        timeframe: str = Form(...),
-        alert_cooldown_seconds: int = Form(...),
-        status_log_seconds: float = Form(...),
-        rsi_period: int = Form(...),
-        extreme_rsi_enabled: str | None = Form(None),
-        extreme_rsi_high: float = Form(...),
-        extreme_rsi_low: float = Form(...),
-        extreme_rsi_live: str | None = Form(None),
-        rsi_macd_enabled: str | None = Form(None),
-        rsi_reclaim_timeframe: str = Form(...),
-        rsi_macd_oversold: float = Form(...),
-        rsi_reclaim_level: float = Form(...),
-        rsi_reclaim_follow_poll: str | None = Form(None),
-        rsi_reclaim_poll: float = Form(...),
-        rsi_reclaim_cooldown: int = Form(...),
-        divergence_enabled: str | None = Form(None),
-        bb_squeeze_enabled: str | None = Form(None),
-        volume_spike_enabled: str | None = Form(None),
-        vs_min_price_pct: float = Form(...),
-        vs_volume_mult: float = Form(...),
-        vs_quiet_range_pct: float = Form(...),
-        vs_poll_seconds: float = Form(...),
-        vs_cooldown_seconds: int = Form(...),
-        vs_window_bars: int = Form(...),
-        vs_volume_lookback: int = Form(...),
-        vs_quiet_bars: int = Form(...),
-        accumulation_enabled: str | None = Form(None),
-        acc_range_days: int = Form(...),
-        acc_range_pct: float = Form(...),
-        acc_oi_days: int = Form(...),
-        acc_oi_change_pct: float = Form(...),
-        acc_min_oi_usdt: float = Form(...),
-        acc_trend_days: int = Form(...),
-        acc_trend_min_pct: float = Form(...),
-        acc_trend_max_pct: float = Form(...),
-        acc_vol_mult: float = Form(...),
-        acc_tight_range_pct: float = Form(...),
-        acc_btc_rs_pct: float = Form(...),
-        acc_poll_seconds: float = Form(...),
-        acc_cooldown_seconds: int = Form(...),
-        absorption_bar_enabled: str | None = Form(None),
-        ab_wick_ratio: float = Form(...),
-        ab_max_body_ratio: float = Form(...),
-        ab_max_close_pct: float = Form(...),
-        ab_min_range_pct: float = Form(...),
-        ab_volume_mult: float = Form(...),
-        ab_volume_lookback: int = Form(...),
-        ab_poll_seconds: float = Form(...),
-        ab_cooldown_seconds: int = Form(...),
-        ma20_approach_enabled: str | None = Form(None),
-        ma20_tf_1h: str | None = Form(None),
-        ma20_prox_1h: float = Form(...),
-        ma20_tf_4h: str | None = Form(None),
-        ma20_prox_4h: float = Form(...),
-        ma20_tf_1d: str | None = Form(None),
-        ma20_prox_1d: float = Form(...),
-        ma20_poll_seconds: float = Form(...),
-        ma20_cooldown_seconds: int = Form(...),
-        universe_top_percentile: float = Form(...),
-        universe_max_symbols: int = Form(...),
-        include_static_stocks: str | None = Form(None),
-        restart: str | None = Form(None),
-    ):
+    async def save(request: Request):
         if not _logged_in(request):
             return RedirectResponse("/login", status_code=303)
         try:
-            cfg = load_config()
-            data = cfg.model_dump(mode="python")
-            data["poll_interval_seconds"] = float(poll_interval_seconds)
-            data["timeframe"] = timeframe.strip()
-            data["alert_cooldown_seconds"] = int(alert_cooldown_seconds)
-            data["status_log_seconds"] = float(status_log_seconds)
-            data["rsi"]["period"] = int(rsi_period)
-            data["rules"]["extreme_rsi"]["enabled"] = extreme_rsi_enabled == "on"
-            data["rules"]["extreme_rsi"]["high"] = float(extreme_rsi_high)
-            data["rules"]["extreme_rsi"]["low"] = float(extreme_rsi_low)
-            data["rules"]["extreme_rsi"]["live"] = extreme_rsi_live == "on"
-            data["rules"]["rsi_macd_cross"]["enabled"] = rsi_macd_enabled == "on"
-            data["rules"]["rsi_macd_cross"]["live"] = True
-            data["rules"]["rsi_macd_cross"]["timeframe"] = rsi_reclaim_timeframe.strip()
-            data["rules"]["rsi_macd_cross"]["oversold"] = float(rsi_macd_oversold)
-            data["rules"]["rsi_macd_cross"]["reclaim"] = float(rsi_reclaim_level)
-            data["rules"]["rsi_macd_cross"]["follow_global_poll"] = rsi_reclaim_follow_poll == "on"
-            data["rules"]["rsi_macd_cross"]["poll_seconds"] = float(rsi_reclaim_poll)
-            data["rules"]["rsi_macd_cross"]["cooldown_seconds"] = int(rsi_reclaim_cooldown)
-            data["rules"]["divergence"]["enabled"] = divergence_enabled == "on"
-            data["rules"]["bb_squeeze"]["enabled"] = bb_squeeze_enabled == "on"
-            data["rules"]["volume_spike"]["enabled"] = volume_spike_enabled == "on"
-            data["rules"]["volume_spike"]["min_price_pct"] = float(vs_min_price_pct)
-            data["rules"]["volume_spike"]["volume_mult"] = float(vs_volume_mult)
-            data["rules"]["volume_spike"]["quiet_range_pct"] = float(vs_quiet_range_pct)
-            data["rules"]["volume_spike"]["poll_seconds"] = float(vs_poll_seconds)
-            data["rules"]["volume_spike"]["cooldown_seconds"] = int(vs_cooldown_seconds)
-            data["rules"]["volume_spike"]["window_bars"] = int(vs_window_bars)
-            data["rules"]["volume_spike"]["volume_lookback"] = int(vs_volume_lookback)
-            data["rules"]["volume_spike"]["quiet_bars"] = int(vs_quiet_bars)
-            data["rules"]["accumulation"]["enabled"] = accumulation_enabled == "on"
-            data["rules"]["accumulation"]["range_days"] = int(acc_range_days)
-            data["rules"]["accumulation"]["range_pct"] = float(acc_range_pct)
-            data["rules"]["accumulation"]["oi_days"] = int(acc_oi_days)
-            data["rules"]["accumulation"]["oi_change_pct"] = float(acc_oi_change_pct)
-            data["rules"]["accumulation"]["min_oi_usdt"] = float(acc_min_oi_usdt)
-            data["rules"]["accumulation"]["trend_days"] = int(acc_trend_days)
-            data["rules"]["accumulation"]["trend_min_pct"] = float(acc_trend_min_pct)
-            data["rules"]["accumulation"]["trend_max_pct"] = float(acc_trend_max_pct)
-            data["rules"]["accumulation"]["vol_mult"] = float(acc_vol_mult)
-            data["rules"]["accumulation"]["tight_range_pct"] = float(acc_tight_range_pct)
-            data["rules"]["accumulation"]["btc_rs_pct"] = float(acc_btc_rs_pct)
-            data["rules"]["accumulation"]["poll_seconds"] = float(acc_poll_seconds)
-            data["rules"]["accumulation"]["cooldown_seconds"] = int(acc_cooldown_seconds)
-            data["rules"]["absorption_bar"]["enabled"] = absorption_bar_enabled == "on"
-            data["rules"]["absorption_bar"]["wick_ratio"] = float(ab_wick_ratio)
-            data["rules"]["absorption_bar"]["max_body_ratio"] = float(ab_max_body_ratio)
-            data["rules"]["absorption_bar"]["max_close_pct"] = float(ab_max_close_pct)
-            data["rules"]["absorption_bar"]["min_range_pct"] = float(ab_min_range_pct)
-            data["rules"]["absorption_bar"]["volume_mult"] = float(ab_volume_mult)
-            data["rules"]["absorption_bar"]["volume_lookback"] = int(ab_volume_lookback)
-            data["rules"]["absorption_bar"]["poll_seconds"] = float(ab_poll_seconds)
-            data["rules"]["absorption_bar"]["cooldown_seconds"] = int(ab_cooldown_seconds)
-            ma20 = data["rules"].setdefault("ma20_approach", {})
-            ma20["enabled"] = ma20_approach_enabled == "on"
-            ma20.setdefault("tf_1h", {})["enabled"] = ma20_tf_1h == "on"
-            ma20.setdefault("tf_1h", {})["proximity_pct"] = float(ma20_prox_1h)
-            ma20.setdefault("tf_4h", {})["enabled"] = ma20_tf_4h == "on"
-            ma20.setdefault("tf_4h", {})["proximity_pct"] = float(ma20_prox_4h)
-            ma20.setdefault("tf_1d", {})["enabled"] = ma20_tf_1d == "on"
-            ma20.setdefault("tf_1d", {})["proximity_pct"] = float(ma20_prox_1d)
-            ma20["poll_seconds"] = float(ma20_poll_seconds)
-            ma20["cooldown_seconds"] = int(ma20_cooldown_seconds)
-            data["universe"]["top_percentile"] = float(universe_top_percentile)
-            data["universe"]["max_symbols"] = int(universe_max_symbols)
-            data["universe"]["include_static_stocks"] = include_static_stocks == "on"
-
+            form = await request.form()
+            data = _apply_form(load_config().model_dump(mode="python"), form)
             new_cfg = AppConfig.model_validate(data)
             path = default_config_path()
             bak = path.with_suffix(".yaml.bak")
@@ -240,7 +114,7 @@ def create_app() -> FastAPI:
             save_config(new_cfg, path)
 
             msg = "설정 저장 완료 · 모니터가 수 초 내 자동 반영"
-            if restart == "1":
+            if form.get("restart") == "1":
                 ok, detail = _restart_monitor()
                 msg = f"설정 저장 완료 · 모니터 재시작 {'OK' if ok else '실패: ' + detail}"
             return RedirectResponse(f"/config?msg={_q(msg)}", status_code=303)
@@ -257,6 +131,77 @@ def create_app() -> FastAPI:
         return RedirectResponse(f"/config?err={_q('재시작 실패: ' + detail)}", status_code=303)
 
     return app
+
+
+def _apply_form(data: dict[str, Any], form) -> dict[str, Any]:
+    def on(name: str) -> bool:
+        return form.get(name) == "on"
+
+    def num(name: str) -> float:
+        raw = str(form.get(name, "")).strip()
+        if raw == "":
+            raise ValueError(f"값이 비어 있습니다: {name}")
+        return float(raw)
+
+    data["poll_seconds"] = num("poll_seconds")
+    data["status_log_seconds"] = num("status_log_seconds")
+
+    u = data["universe"]
+    u["enabled"] = on("universe_enabled")
+    u["top_n"] = int(num("universe_top_n"))
+    u["include_tradfi"] = on("universe_include_tradfi")
+    u["refresh_hours"] = num("universe_refresh_hours")
+    u["exclude_bases"] = [
+        s.strip().upper()
+        for s in str(form.get("universe_exclude", "")).replace("\n", ",").split(",")
+        if s.strip()
+    ]
+
+    m = data["macro"]
+    m["enabled"] = on("macro_enabled")
+    m["poll_seconds"] = num("macro_poll_seconds")
+    m["assets"] = _parse_macro(str(form.get("macro_assets", "")))
+
+    r = data["rsi_alert"]
+    r["enabled"] = on("rsi_enabled")
+    r["period"] = int(num("rsi_period"))
+    r["rearm_gap"] = num("rsi_rearm_gap")
+    for tf in TIMEFRAMES:
+        t = r[f"tf_{tf}"]
+        t["enabled"] = on(f"rsi_{tf}_enabled")
+        t["overbought_enabled"] = on(f"rsi_{tf}_ob_on")
+        t["overbought"] = num(f"rsi_{tf}_ob")
+        t["oversold_enabled"] = on(f"rsi_{tf}_os_on")
+        t["oversold"] = num(f"rsi_{tf}_os")
+
+    ma = data["ma_alert"]
+    ma["enabled"] = on("ma_enabled")
+    ma["rearm_mult"] = num("ma_rearm_mult")
+    for key, _kind, _period, _label in MA_LINES:
+        line = ma[key]
+        line["enabled"] = on(f"ma_{key}_enabled")
+        for tf in TIMEFRAMES:
+            t = line[f"tf_{tf}"]
+            t["enabled"] = on(f"ma_{key}_{tf}_enabled")
+            t["proximity_pct"] = num(f"ma_{key}_{tf}_pct")
+            t["from_above"] = on(f"ma_{key}_{tf}_above")
+            t["from_below"] = on(f"ma_{key}_{tf}_below")
+    return data
+
+
+def _parse_macro(text: str) -> list[dict[str, str]]:
+    """한 줄에 '티커, 이름'. 이름 생략 시 티커를 이름으로."""
+    out: list[dict[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        ticker, _, name = line.partition(",")
+        ticker = ticker.strip()
+        if not ticker:
+            continue
+        out.append({"ticker": ticker, "name": name.strip() or ticker})
+    return out
 
 
 def _logged_in(request: Request) -> bool:

@@ -1,127 +1,67 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
 from app.config import load_config
-from app.models import Quote
-from app.service import fetch_all
 
 
 console = Console(force_terminal=True, soft_wrap=True)
 
 
-def _fmt_price(price: float) -> str:
-    abs_price = abs(price)
-    if abs_price >= 1000:
-        return f"{price:,.2f}"
-    if abs_price >= 1:
-        return f"{price:,.4f}"
-    return f"{price:.6f}"
-
-
-def _build_table(quotes: list[Quote]) -> Table:
-    table = Table(title="시세 조회 결과", show_lines=False)
-    table.add_column("구분", style="cyan")
-    table.add_column("이름")
-    table.add_column("심볼")
-    table.add_column("가격", justify="right")
-    table.add_column("통화")
-    table.add_column("등락%", justify="right")
-    table.add_column("소스")
-    table.add_column("시각(UTC)")
-
-    for q in quotes:
-        change = f"{q.change_pct:+.2f}" if q.change_pct is not None else "-"
-        table.add_row(
-            q.asset_class.value,
-            q.name,
-            q.symbol,
-            _fmt_price(q.price),
-            q.currency,
-            change,
-            q.source,
-            q.fetched_at.strftime("%Y-%m-%d %H:%M:%S"),
-        )
-    return table
-
-
 def cmd_verify(args: argparse.Namespace) -> int:
-    from app.universe import resolve_watch_targets
+    """알람 없이 한 번 받아서 RSI / 이평 이격을 표로 확인."""
+    from app.config import MA_LINES
+    from app.market import MarketData
+    from app.signals import compute_snapshot, fmt_price
+    from app.timeframes import TIMEFRAMES
 
     config = load_config(args.config)
-    console.print(f"[bold]config:[/bold] {Path(args.config).resolve() if args.config else 'config.yaml'}")
-    if config.universe.enabled:
-        u = config.universe
-        console.print(
-            f"유니버스 ON - Binance {u.quote_asset}, "
-            f"{u.volume_lookback_days}일 거래량 상위 {u.top_percentile}% (max {u.max_symbols})"
-        )
-        targets = resolve_watch_targets(config, log=console.print, force_universe=False)
-        console.print(f"감시 심볼: {len(targets)}개 (예: {', '.join(t.symbol for t in targets[:8])}...)")
-        console.print("[green]OK[/green] - 유니버스 로드 성공 (시세 전체 검증은 `run`에서 수행)")
-        return 0
-
-    console.print(
-        f"감시 대상 - crypto={len(config.crypto)}, "
-        f"kr={len(config.kr_stocks)}, us={len(config.us_stocks)}"
-    )
-
+    market = MarketData(log=lambda m: console.print(m, markup=False))
     try:
-        quotes = fetch_all(config)
-    except Exception as exc:
-        console.print(f"[red]조회 실패:[/red] {exc}")
-        return 1
+        u = config.universe
+        if u.enabled and args.binance > 0:
+            symbols = market.binance.top_symbols(u.top_n, u.include_tradfi, u.exclude_bases)
+            console.print(f"바이낸스 상위 {len(symbols)}개: " + ", ".join(s.symbol for s in symbols))
+            added, _ = market.set_binance_universe(symbols[: args.binance])
+            market.bootstrap_binance(added, lambda: False)
+        if config.macro.enabled and not args.no_macro:
+            added, _ = market.set_macro_assets(config.macro.assets)
+            market.bootstrap_macro(added)
 
-    if not quotes:
-        console.print("[yellow]조회된 시세가 없습니다. config.yaml 심볼을 확인하세요.[/yellow]")
-        return 1
-
-    console.print(_build_table(quotes))
-    console.print(f"[green]OK[/green] - {len(quotes)}건 조회 성공")
-
-    if args.json:
-        out = [q.model_dump(mode="json") for q in quotes]
-        Path(args.json).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-        console.print(f"JSON 저장: {args.json}")
-
-    return 0
-
-
-def cmd_fetch_one(args: argparse.Namespace) -> int:
-    from app.fetchers.crypto import CryptoFetcher
-    from app.fetchers.stocks import StockFetcher
-    from app.models import AssetClass
-
-    config = load_config(args.config)
-    kind = args.kind
-
-    if kind == "crypto":
-        quotes = CryptoFetcher(config.crypto).fetch()
-    elif kind == "kr":
-        quotes = StockFetcher(config.kr_stocks, AssetClass.KR_STOCK, "KRW").fetch()
-    elif kind == "us":
-        quotes = StockFetcher(config.us_stocks, AssetClass.US_STOCK, "USD").fetch()
-    else:
-        console.print(f"[red]unknown kind:[/red] {kind}")
-        return 1
-
-    if not quotes:
-        console.print(f"[yellow]{kind}: 결과 없음[/yellow]")
-        return 1
-
-    console.print(_build_table(quotes))
-    console.print(f"[green]OK[/green] - {kind} {len(quotes)}건")
-    return 0
+        table = Table(title="RSI / 이평 이격% (형성 중 봉 포함)", show_lines=True)
+        table.add_column("자산")
+        table.add_column("가격", justify="right")
+        for tf in TIMEFRAMES:
+            table.add_column(tf)
+        short = {"ema50": "E50", "ema200": "E200", "vwma100": "VW100"}
+        for a in market.assets():
+            price = "-"
+            cells = []
+            for tf in TIMEFRAMES:
+                bars = market.bars(a, tf)
+                snap = compute_snapshot(bars, config.rsi_alert.period)
+                if snap is None:
+                    cells.append("데이터 없음")
+                    continue
+                price = fmt_price(snap.price)
+                rows = [f"{len(bars)}봉", f"RSI {snap.rsi:.1f}" if snap.rsi is not None else "RSI -"]
+                for key, _k, _p, _l in MA_LINES:
+                    d = snap.dist_pct(key)
+                    rows.append(f"{short[key]} {d:+.2f}%" if d is not None else f"{short[key]} -")
+                cells.append("\n".join(rows))
+            table.add_row(a.display, price, *cells)
+        console.print(table)
+        return 0
+    finally:
+        market.close()
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """상시 모니터: 폴링 -> 봉 저장 -> RSI -> 알림."""
+    """상시 모니터 (Ctrl+C 종료)."""
     from app.monitor import Monitor
 
     config = load_config(args.config)
@@ -155,7 +95,7 @@ def cmd_telegram_test(args: argparse.Namespace) -> int:
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
-    """설정 UI + Start/Stop."""
+    """PC용 Start/Stop UI."""
     from app.ui import run_ui
 
     return run_ui(args.config)
@@ -172,7 +112,7 @@ def cmd_config_web(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stock-monitor",
-        description="코인/한국주식/미국주식 시세 조회 및 RSI 알림 모니터",
+        description="바이낸스 선물 상위 종목 + 큰 자산 RSI / 이평 근접 텔레그램 알람",
     )
     parser.add_argument(
         "--config",
@@ -182,18 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=False)
 
-    ui = sub.add_parser("ui", help="설정 UI 실행 (기본)")
+    ui = sub.add_parser("ui", help="PC UI 실행 (기본)")
     ui.set_defaults(func=cmd_ui)
 
-    verify = sub.add_parser("verify", help="설정된 전체 심볼 시세를 조회해 표로 검증")
-    verify.add_argument("--json", metavar="PATH", help="결과를 JSON 파일로 저장")
+    verify = sub.add_parser("verify", help="알람 없이 한 번 조회해 RSI/이평 이격 표 출력")
+    verify.add_argument("--binance", type=int, default=5, help="표에 넣을 바이낸스 상위 종목 수 (0이면 생략)")
+    verify.add_argument("--no-macro", action="store_true", help="야후 자산 생략")
     verify.set_defaults(func=cmd_verify)
 
-    one = sub.add_parser("fetch", help="자산 종류별로만 조회 (crypto|kr|us)")
-    one.add_argument("kind", choices=["crypto", "kr", "us"])
-    one.set_defaults(func=cmd_fetch_one)
-
-    run = sub.add_parser("run", help="상시 실행(CLI): 폴링 + RSI 알림 (Ctrl+C 종료)")
+    run = sub.add_parser("run", help="상시 실행(CLI) (Ctrl+C 종료)")
     run.set_defaults(func=cmd_run)
 
     tg = sub.add_parser("telegram-test", help="텔레그램 테스트 메시지 전송")

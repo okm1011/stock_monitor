@@ -1,19 +1,24 @@
 # Stock Monitor
 
-Binance 시세를 받아 **1시간 봉 마감** 기준으로 규칙이 맞으면 텔레그램 알림을 보냅니다.  
+바이낸스 선물 상위 종목과 큰 자산(지수·원자재·금리·환율)의 **4시간/일/주/월봉**을 감시해서 조건에 들어오는 순간 텔레그램 알림을 보냅니다.  
 서버(AWS EC2)에서 `systemd`로 24시간 실행 중입니다.
 
-- 코인: 바이낸스 현물 USDT, **7일 거래대금 상위 30%**(최대 60개), 매일 갱신
-- 주식/ETF: 바이낸스 USDⓈ-M 선물 (`config.yaml`의 `us_stocks` + `binance_futures`)
-# 알람 규칙 on/off (`config.yaml` rules.*.enabled)
-# - extreme_rsi: RSI 과매수/과매도
-# - rsi_macd_cross: RSI 하강(oversold) 후 재돌파(reclaim) (전종목, 형성중봉)
-# - ma20_approach: SMA20 위에서 아래로 근접 (1h/4h/1d 개별 on/off)
-# - divergence: 상/하강 다이버전스
-# - bb_squeeze: 볼린저 스퀴즈
-# - volume_spike: 잡코인 펌프 초입 (가격% ∧ 거래량 ∧ 횡보 ∧ 메이저제외)
-# - accumulation: 알트코인 신호 1 OI 변동
-# - absorption_bar: 알트코인 신호 2 매집봉 (윗꼬리+거래량, 종가 거의 고정)
+**감시 대상**
+
+- 바이낸스 USDⓈ-M 선물 **24시간 거래대금 상위 100개** (코인 + NVDA·SOXL 같은 주식 토큰 + 금·원유 같은 원자재 토큰), 하루 1번 갱신
+- 야후 파이낸스 큰 자산 20개: 나스닥100·S&P500·러셀2000 선물, SOXX, 금·은·백금·구리, WTI·브렌트·천연가스, 달러인덱스, 미 10년물 금리, TLT, VIX, 달러/엔, 달러/원, 코스피, 니케이, 항셍 (웹에서 추가/삭제)
+
+**알람**
+
+| 알람 | 조건 | 설정 |
+|------|------|------|
+| 1. RSI 과매수/과매도 | RSI(14)가 과매수 기준을 위로 넘거나 과매도 기준 아래로 내려가는 순간 | 타임프레임별 on/off, 과매수·과매도 각각 on/off와 숫자 |
+| 2. 이평 근접 | 가격이 EMA50 / EMA200 / VWMA100 **위에서 내려오거나 아래에서 올라와** 근접 % 안으로 들어오는 순간 | 선 × 타임프레임별 on/off, 근접 %, 위/아래 방향 |
+
+- 형성 중인 봉 기준으로 바로 울립니다 (봉 마감 대기 없음). 같은 봉에서 같은 신호는 1번만.
+- 재알람 조건: 알람 후 RSI는 기준에서 5포인트, 이평은 근접 %의 3배만큼 멀어졌다가 다시 들어와야 또 울립니다 (경계선 잔진동 방지).
+- 데이터가 모자라면 해당 알람만 자동으로 건너뜁니다. 예: 상장 1년 미만 토큰의 월봉 RSI, 바이낸스 코인의 월봉 EMA200(200개월 필요), 거래량 없는 지수·금리·환율의 VWMA100.
+- 야후는 4시간봉이 없어서 1시간봉을 세션 시작부터 4개씩 묶어 만듭니다 (미국 주식 09:30/13:30, CME 선물 18:00 ET 기준).
 
 ---
 
@@ -223,59 +228,39 @@ sudo systemctl restart stock-monitor
 
 ## 설정 요약 (`config.yaml`)
 
+보통은 설정 웹(`http://서버IP:8080`)에서 바꾸면 됩니다. 파일 구조:
+
 ```yaml
-universe:
-  enabled: true
-  top_percentile: 30   # 부하 크면 15
-  max_symbols: 60
-  refresh_hours: 24
-  include_static_stocks: true
-
-us_stocks:             # 바이낸스 선물로 받는 종목
-  - ticker: SKHY
-    binance_futures: SKHYUSDT
-  # ...
-
-timeframe: 1h
-signal_on_closed_bar: true
-
-rules:
-  extreme_rsi:
-    enabled: true
-  volume_spike:          # 잡코인 펌프 초입 (1∧2∧3)
-    enabled: true
-    timeframe: 3m
-    window_bars: 5
-    min_price_pct: 15
-    volume_mult: 4.0
-    quiet_bars: 40
-    quiet_range_pct: 10
-    cooldown_seconds: 600
-  accumulation:          # 알트 신호 1 OI 변동
-    enabled: true
-    range_pct: 38
-    tight_range_pct: 26
-    oi_change_pct: 15
-    vol_mult: 1.4
-    btc_rs_pct: 4.5
-    min_oi_usdt: 1500000
-    cooldown_seconds: 86400
-  absorption_bar:        # 알트 신호 2 매집봉
-    enabled: true
-    timeframe: 4h
-    wick_ratio: 0.62
-    max_body_ratio: 0.25
-    max_close_pct: 2.5
-    min_range_pct: 1.8
-    volume_mult: 3.5
-    cooldown_seconds: 28800
+poll_seconds: 60          # 바이낸스 갱신 주기 (30 이상)
+universe:                 # 바이낸스 선물 상위 N
+  top_n: 100
+  include_tradfi: true    # 주식·원자재 토큰 포함
+  exclude_bases: [USDC, FDUSD, ...]
+macro:                    # 야후 큰 자산
+  poll_seconds: 300       # 120 이상 (야후 차단 방지)
+  assets:
+    - {ticker: NQ=F, name: 나스닥100 선물}
+    # ...
+rsi_alert:                # 알람 1
+  period: 14
+  rearm_gap: 5            # 재알람: 기준에서 5포인트 되돌아가야
+  tf_4h: {enabled: true, overbought_enabled: true, overbought: 75, oversold_enabled: true, oversold: 25}
+  tf_1d: {...}            # tf_1w, tf_1mo 동일 구조
+ma_alert:                 # 알람 2
+  rearm_mult: 3           # 재알람: 근접%×3 이상 멀어져야
+  ema50:                  # ema200, vwma100 동일 구조
+    tf_4h: {enabled: true, proximity_pct: 1.0, from_above: true, from_below: true}
+    tf_1d: {...}
 ```
 
-- RSI 등 기존 알람은 **1시간 봉** 마감 기준
-- `volume_spike`는 선물 알트 **펌프 초입만** (메이저 제외, 횡보 후 +15%·거래량×4)
-- `accumulation`은 **알트 신호 1**: 아직 안 터진 알트 중 **OI↑ 필수** + 박스/거래량/BTC강세 중 1개
-- `absorption_bar`는 **알트 신호 2**: 4h 매집봉 (윗꼬리 + 거래량, 종가는 거의 안 움직임)
-- 같은 심볼 반복은 `cooldown_seconds`로 제한
+알람 양 참고 (최근 30일 시뮬레이션, 바이낸스 상위 100 · 4h+일봉만): 기본값으로 하루 약 100건이고, 그중 4시간봉 EMA50 근접이 약 30건으로 가장 많습니다. 너무 많으면 4시간봉 이평 근접을 끄거나 `top_n`을 줄이세요.
+
+알람 없이 현재 RSI / 이평 이격만 표로 보기:
+
+```bash
+python -m app verify              # 바이낸스 상위 5개 + 야후 전체
+python -m app verify --binance 20 --no-macro
+```
 
 PC에서 UI로 보려면:
 
