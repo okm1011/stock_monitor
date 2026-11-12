@@ -37,21 +37,21 @@ def cmd_verify(args: argparse.Namespace) -> int:
         table.add_column("가격", justify="right")
         for tf in TIMEFRAMES:
             table.add_column(tf)
-        short = {"ema50": "E50", "ema200": "E200", "vwma100": "VW100"}
         for a in market.assets():
             price = "-"
             cells = []
             for tf in TIMEFRAMES:
                 bars = market.bars(a, tf)
-                snap = compute_snapshot(bars, config.rsi_alert.period)
+                snap = compute_snapshot(bars, config)
                 if snap is None:
                     cells.append("데이터 없음")
                     continue
                 price = fmt_price(snap.price)
                 rows = [f"{len(bars)}봉", f"RSI {snap.rsi:.1f}" if snap.rsi is not None else "RSI -"]
-                for key, _k, _p, _l in MA_LINES:
+                for key, _period in MA_LINES:
                     d = snap.dist_pct(key)
-                    rows.append(f"{short[key]} {d:+.2f}%" if d is not None else f"{short[key]} -")
+                    name = snap.labels[key]
+                    rows.append(f"{name} {d:+.2f}%" if d is not None else f"{name} -")
                 cells.append("\n".join(rows))
             table.add_row(a.display, price, *cells)
         console.print(table)

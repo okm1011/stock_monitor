@@ -100,7 +100,7 @@ class MonitorApp(tk.Tk):
         tk.Label(left, text="Stock Monitor", font=FONT_TITLE, fg=TEXT, bg=BG).pack(anchor="w")
         tk.Label(
             left,
-            text="바이낸스 선물 상위 + 큰 자산 · RSI 과매수/과매도 · EMA50/200·VWMA100 근접",
+            text="바이낸스 선물 상위 + 큰 자산 · RSI 과매수/과매도 · 50/200/100 이평 근접",
             font=FONT_SMALL, fg=SUB, bg=BG,
         ).pack(anchor="w")
         right = tk.Frame(header, bg=BG)

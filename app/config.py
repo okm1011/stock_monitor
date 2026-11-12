@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -184,8 +184,15 @@ def _ma_tf(pct: float) -> MaTfConfig:
     return MaTfConfig(proximity_pct=pct)
 
 
+MaType = Literal["ema", "sma", "vwma"]
+
+MA_TYPE_LABEL: dict[str, str] = {"ema": "EMA", "sma": "MA", "vwma": "VWMA"}
+
+
 class MaLineConfig(BaseModel):
     enabled: bool = True
+    # ema: 지수이평, sma: 단순이평(MA), vwma: 거래량가중이평
+    type: MaType = "ema"
     tf_4h: MaTfConfig = Field(default_factory=lambda: _ma_tf(1.0))
     tf_1d: MaTfConfig = Field(default_factory=lambda: _ma_tf(1.5))
     tf_1w: MaTfConfig = Field(default_factory=lambda: _ma_tf(3.0))
@@ -195,23 +202,27 @@ class MaLineConfig(BaseModel):
         return getattr(self, f"tf_{tf}")
 
 
-# (설정 키, 종류, 기간, 표시 이름)
-MA_LINES: tuple[tuple[str, str, int, str], ...] = (
-    ("ema50", "ema", 50, "EMA50"),
-    ("ema200", "ema", 200, "EMA200"),
-    ("vwma100", "vwma", 100, "VWMA100"),
+# (설정 키, 기간)
+MA_LINES: tuple[tuple[str, int], ...] = (
+    ("ma50", 50),
+    ("ma200", 200),
+    ("ma100", 100),
 )
 
 
+def ma_label(ma_type: str, period: int) -> str:
+    return f"{MA_TYPE_LABEL[ma_type]}{period}"
+
+
 class MaAlertConfig(BaseModel):
-    """알람 2: 가격이 EMA50 / EMA200 / VWMA100 위·아래에서 근접 밴드 안으로 들어오는 순간."""
+    """알람 2: 가격이 50 / 200 / 100 이평선(EMA·MA·VWMA 선택) 위·아래에서 근접 밴드 안으로 들어오는 순간."""
 
     enabled: bool = True
     # 알람 후 이격이 근접%×이 배수 이상으로 벌어져야 같은 알람이 다시 울림 (밴드 경계 잔진동 방지)
     rearm_mult: float = 3.0
-    ema50: MaLineConfig = Field(default_factory=MaLineConfig)
-    ema200: MaLineConfig = Field(default_factory=MaLineConfig)
-    vwma100: MaLineConfig = Field(default_factory=MaLineConfig)
+    ma50: MaLineConfig = Field(default_factory=lambda: MaLineConfig(type="ema"))
+    ma200: MaLineConfig = Field(default_factory=lambda: MaLineConfig(type="ema"))
+    ma100: MaLineConfig = Field(default_factory=lambda: MaLineConfig(type="vwma"))
 
     @field_validator("rearm_mult")
     @classmethod
@@ -265,7 +276,7 @@ CONFIG_HEADER = (
     "# stock-monitor config (웹 설정 페이지에서 저장하면 이 파일이 다시 쓰입니다)\n"
     "# 타임프레임: tf_4h=4시간봉, tf_1d=일봉, tf_1w=주봉, tf_1mo=월봉\n"
     "# 알람 1 rsi_alert: RSI 과매수 상향 돌파 / 과매도 하향 돌파 (형성 중 봉, 봉당 1회)\n"
-    "# 알람 2 ma_alert: EMA50 / EMA200 / VWMA100 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)\n"
+    "# 알람 2 ma_alert: ma50 / ma200 / ma100 (type: ema=EMA, sma=MA, vwma=VWMA) 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)\n"
 )
 
 

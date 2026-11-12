@@ -9,7 +9,7 @@ from threading import Event
 from rich.console import Console
 
 from app.alerts import Notifier, batch_messages, build_notifier
-from app.config import AppConfig, default_config_path, load_config
+from app.config import MA_LINES, AppConfig, default_config_path, load_config, ma_label
 from app.market import MarketData
 from app.series import Asset
 from app.settings import get_settings
@@ -237,13 +237,13 @@ class Monitor:
             os_ = f"{t.oversold:g}" if t.oversold_enabled else "-"
             rsi_parts.append(f"{tf} {ob}/{os_}")
         ma_parts = []
-        for key in ("ema50", "ema200", "vwma100"):
+        for key, period in MA_LINES:
             line = c.ma_alert.line(key)
             if not line.enabled:
                 continue
             tfs = [f"{tf}±{line.tf(tf).proximity_pct:g}%" for tf in TIMEFRAMES if line.tf(tf).enabled]
             if tfs:
-                ma_parts.append(f"{key}[{' '.join(tfs)}]")
+                ma_parts.append(f"{ma_label(line.type, period)}[{' '.join(tfs)}]")
         self._log(
             f"{prefix}: 바이낸스 {'상위 ' + str(u.top_n) if u.enabled else 'OFF'}"
             f"{' (주식/원자재 포함)' if u.enabled and u.include_tradfi else ''} 갱신 {c.poll_seconds:g}s | "
@@ -273,7 +273,7 @@ class Monitor:
             parts = []
             price = None
             for tf in TIMEFRAMES:
-                snap = compute_snapshot(self.market.bars(a, tf), self.config.rsi_alert.period)
+                snap = compute_snapshot(self.market.bars(a, tf), self.config)
                 if snap is None:
                     parts.append(f"{tf} -")
                     continue

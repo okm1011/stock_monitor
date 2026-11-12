@@ -38,6 +38,12 @@ def _rsi_from_avg(avg_gain: float, avg_loss: float) -> float:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
+def calc_sma(values: list[float], period: int) -> float | None:
+    if period < 1 or len(values) < period:
+        return None
+    return sum(values[-period:]) / period
+
+
 def calc_ema(values: list[float], period: int) -> float | None:
     """TradingView ta.ema 와 같은 방식: 첫 period개 SMA로 시작 후 k=2/(n+1)."""
     n = len(values)

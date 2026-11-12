@@ -11,7 +11,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import MA_LINES, AppConfig, default_config_path, load_config, save_config
+from app.config import (
+    MA_LINES,
+    MA_TYPE_LABEL,
+    AppConfig,
+    default_config_path,
+    load_config,
+    save_config,
+)
 from app.settings import get_settings
 from app.timeframes import TF_LABEL, TIMEFRAMES
 
@@ -91,6 +98,7 @@ def create_app() -> FastAPI:
                 "timeframes": TIMEFRAMES,
                 "tf_label": TF_LABEL,
                 "ma_lines": MA_LINES,
+                "ma_types": MA_TYPE_LABEL,
                 "macro_text": "\n".join(f"{a.ticker}, {a.name}" for a in cfg.macro.assets),
                 "exclude_text": ", ".join(cfg.universe.exclude_bases),
                 "msg": msg,
@@ -177,9 +185,10 @@ def _apply_form(data: dict[str, Any], form) -> dict[str, Any]:
     ma = data["ma_alert"]
     ma["enabled"] = on("ma_enabled")
     ma["rearm_mult"] = num("ma_rearm_mult")
-    for key, _kind, _period, _label in MA_LINES:
+    for key, _period in MA_LINES:
         line = ma[key]
         line["enabled"] = on(f"ma_{key}_enabled")
+        line["type"] = str(form.get(f"ma_{key}_type", line.get("type", "ema"))).strip()
         for tf in TIMEFRAMES:
             t = line[f"tf_{tf}"]
             t["enabled"] = on(f"ma_{key}_{tf}_enabled")

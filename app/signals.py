@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.config import MA_LINES, AppConfig
-from app.indicators import calc_ema, calc_rsi, calc_vwma
+from app.config import MA_LINES, AppConfig, ma_label
+from app.indicators import calc_ema, calc_rsi, calc_sma, calc_vwma
 from app.series import Asset, Bar
 from app.timeframes import TF_LABEL
 
@@ -12,8 +12,10 @@ from app.timeframes import TF_LABEL
 class Snapshot:
     price: float
     rsi: float | None
-    # ema50 / ema200 / vwma100 → 값 (데이터 부족·거래량 없음이면 None)
+    # ma50 / ma200 / ma100 → 값 (데이터 부족·거래량 없음이면 None)
     lines: dict[str, float | None] = field(default_factory=dict)
+    # ma50 → "EMA50" 처럼 실제 계산한 선 이름
+    labels: dict[str, str] = field(default_factory=dict)
 
     def dist_pct(self, line_key: str) -> float | None:
         ma = self.lines.get(line_key)
@@ -22,18 +24,28 @@ class Snapshot:
         return (self.price - ma) / ma * 100.0
 
 
-def compute_snapshot(bars: list[Bar], rsi_period: int) -> Snapshot | None:
+def compute_snapshot(bars: list[Bar], cfg: AppConfig) -> Snapshot | None:
     if not bars:
         return None
     closes = [b.close for b in bars]
     volumes = [b.volume for b in bars]
     lines: dict[str, float | None] = {}
-    for key, kind, period, _label in MA_LINES:
-        if kind == "ema":
+    labels: dict[str, str] = {}
+    for key, period in MA_LINES:
+        ma_type = cfg.ma_alert.line(key).type
+        if ma_type == "ema":
             lines[key] = calc_ema(closes, period)
+        elif ma_type == "sma":
+            lines[key] = calc_sma(closes, period)
         else:
             lines[key] = calc_vwma(closes, volumes, period)
-    return Snapshot(price=closes[-1], rsi=calc_rsi(closes, rsi_period), lines=lines)
+        labels[key] = ma_label(ma_type, period)
+    return Snapshot(
+        price=closes[-1],
+        rsi=calc_rsi(closes, cfg.rsi_alert.period),
+        lines=lines,
+        labels=labels,
+    )
 
 
 class AlertEngine:
@@ -55,7 +67,7 @@ class AlertEngine:
                 del d[k]
 
     def evaluate(self, asset: Asset, tf: str, bars: list[Bar], cfg: AppConfig) -> list[str]:
-        snap = compute_snapshot(bars, cfg.rsi_alert.period)
+        snap = compute_snapshot(bars, cfg)
         if snap is None:
             return []
         bar_ot = bars[-1].open_time
@@ -88,19 +100,22 @@ class AlertEngine:
                 messages.append(_rsi_message(asset, tf, "과매도", prev, rsi, os_, "하향", snap.price, ra.period))
 
         ma = cfg.ma_alert
-        for key, _kind, _period, label in MA_LINES:
+        for key, _period in MA_LINES:
             dist = snap.dist_pct(key)
             if dist is None:
                 continue
-            prev = self._swap((asset.key, tf, key), dist)
+            label = snap.labels[key]
             line_cfg = ma.line(key)
+            # 상태 키에 선 종류를 넣어 EMA↔MA 전환 직후 값이 튀어도 알람이 나지 않게 함
+            state = f"{key}:{line_cfg.type}"
+            prev = self._swap((asset.key, tf, state), dist)
             tcfg = line_cfg.tf(tf)
             active = ma.enabled and line_cfg.enabled and tcfg.enabled
             p = tcfg.proximity_pct
             far = p * ma.rearm_mult
             line_value = snap.lines[key]
             if self._trigger(
-                (asset.key, tf, key, "above"),
+                (asset.key, tf, state, "above"),
                 outside=dist > p,
                 rearmed=dist >= far,
                 hit=prev is not None and prev > p and dist <= p,
@@ -109,7 +124,7 @@ class AlertEngine:
             ):
                 messages.append(_ma_message(asset, tf, label, "위에서", prev, dist, p, snap.price, line_value))
             if self._trigger(
-                (asset.key, tf, key, "below"),
+                (asset.key, tf, state, "below"),
                 outside=dist < -p,
                 rearmed=dist <= -far,
                 hit=prev is not None and prev < -p and dist >= -p,

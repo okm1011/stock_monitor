@@ -109,7 +109,7 @@
   </div>
 
   <div class="card">
-    <h2>알람 2 · EMA50 / EMA200 / VWMA100 근접</h2>
+    <h2>알람 2 · 50 / 200 / 100 이평선 근접</h2>
     <div class="check">
       <input type="checkbox" id="ma_enabled" name="ma_enabled" {% if cfg.ma_alert.enabled %}checked{% endif %} />
       <label for="ma_enabled">사용</label>
@@ -118,12 +118,19 @@
     <label>재알람 배수 (알람 후 이격이 근접%×배수 이상 벌어져야 다시 울림)</label>
     <input type="number" step="any" name="ma_rearm_mult" value="{{ cfg.ma_alert.rearm_mult }}" required />
     <p class="sub">예) 일봉 근접 1.5%, 배수 3 → 알람 후 선에서 4.5% 이상 멀어졌다가 다시 1.5% 안으로 와야 또 울림. 낮추면 알람이 늘어납니다 (바이낸스 상위 100 기준 4h+일봉 하루 약 100건 @3배, 130건 @2배).</p>
-    {% for key, kind, period, label in ma_lines %}
+    {% for key, period in ma_lines %}
     {% set line = cfg.ma_alert.line(key) %}
     <div class="tfblock">
-      <div class="check">
-        <input type="checkbox" id="ma_{{ key }}_enabled" name="ma_{{ key }}_enabled" {% if line.enabled %}checked{% endif %} />
-        <label for="ma_{{ key }}_enabled"><b>{{ label }}</b></label>
+      <div class="linehead">
+        <div class="check">
+          <input type="checkbox" id="ma_{{ key }}_enabled" name="ma_{{ key }}_enabled" {% if line.enabled %}checked{% endif %} />
+          <label for="ma_{{ key }}_enabled"><b>{{ period }}선</b></label>
+        </div>
+        <select name="ma_{{ key }}_type" aria-label="{{ period }}선 종류">
+          {% for t, tlabel in ma_types.items() %}
+          <option value="{{ t }}" {% if line.type == t %}selected{% endif %}>{{ tlabel }}{{ period }}</option>
+          {% endfor %}
+        </select>
       </div>
       {% for tf in timeframes %}
       {% set t = line.tf(tf) %}

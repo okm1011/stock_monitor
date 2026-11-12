@@ -1,7 +1,7 @@
 # stock-monitor config (웹 설정 페이지에서 저장하면 이 파일이 다시 쓰입니다)
 # 타임프레임: tf_4h=4시간봉, tf_1d=일봉, tf_1w=주봉, tf_1mo=월봉
 # 알람 1 rsi_alert: RSI 과매수 상향 돌파 / 과매도 하향 돌파 (형성 중 봉, 봉당 1회)
-# 알람 2 ma_alert: EMA50 / EMA200 / VWMA100 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)
+# 알람 2 ma_alert: ma50 / ma200 / ma100 (type: ema=EMA, sma=MA, vwma=VWMA) 위·아래에서 근접% 이내 진입 (형성 중 봉, 봉당 1회)
 poll_seconds: 60.0
 status_log_seconds: 600.0
 universe:
@@ -96,8 +96,9 @@ rsi_alert:
 ma_alert:
   enabled: true
   rearm_mult: 3.0
-  ema50:
+  ma50:
     enabled: true
+    type: ema
     tf_4h:
       enabled: true
       proximity_pct: 1.0
@@ -118,8 +119,9 @@ ma_alert:
       proximity_pct: 5.0
       from_above: true
       from_below: true
-  ema200:
+  ma200:
     enabled: true
+    type: ema
     tf_4h:
       enabled: true
       proximity_pct: 1.0
@@ -140,8 +142,9 @@ ma_alert:
       proximity_pct: 5.0
       from_above: true
       from_below: true
-  vwma100:
+  ma100:
     enabled: true
+    type: vwma
     tf_4h:
       enabled: true
       proximity_pct: 1.0
